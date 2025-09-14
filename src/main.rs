@@ -6,7 +6,7 @@ mod ui;
 mod ping_event;
 mod data_processor;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use tokio::{task, runtime::Builder};
@@ -24,7 +24,7 @@ use crate::network::send_ping;
 )]
 struct Args {
     /// Target IP address or hostname to ping
-    #[arg(help = "target IP address or hostname to ping", required = true)]
+    #[arg(help = "target IP address or hostname to ping")]
     target: Vec<String>,
 
     /// Number of pings to send, when count is 0, the maximum number of pings per address is calculated
@@ -51,6 +51,27 @@ struct Args {
 
     #[arg(short = 'o', long = "output", help = "Output file to save ping results")]
     output: Option<String>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Agent mode for monitoring
+    Agent {
+        /// Target IP address or hostname to ping
+        #[arg(help = "target IP address or hostname to ping", required = true)]
+        target: String,
+
+        /// Interval in seconds between pings
+        #[arg(short, long, default_value_t = 1, help = "Interval in seconds between pings")]
+        interval: i32,
+
+        /// Port to monitor (default: ICMP ping, no port specified)
+        #[arg(short, long, help = "Port to monitor")]
+        port: Option<u16>,
+    },
 }
 
 
@@ -58,45 +79,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // parse command line arguments
     let args = Args::parse();
 
-    // set Ctrl+C and q and esc to exit
-    let running = Arc::new(Mutex::new(true));
+    match args.command {
+        Some(Commands::Agent { target, interval, port }) => {
+            println!("Agent mode activated!");
+            println!("Target: {}", target);
+            println!("Interval: {} seconds", interval);
+            if let Some(p) = port {
+                println!("Port: {}", p);
+            } else {
+                println!("Using ICMP ping (no port specified)");
+            }
+            // TODO: Implement agent mode functionality
+        },
+        None => {
+            // Default ping mode
+            if args.target.is_empty() {
+                eprintln!("Error: target IP address or hostname is required");
+                std::process::exit(1);
+            }
 
-    // check output file
-    if let Some(ref output_path) = args.output {
-        if std::path::Path::new(output_path).exists() {
-            eprintln!("Output file already exists: {}", output_path);
-            std::process::exit(1);
+            // set Ctrl+C and q and esc to exit
+            let running = Arc::new(Mutex::new(true));
+
+            // check output file
+            if let Some(ref output_path) = args.output {
+                if std::path::Path::new(output_path).exists() {
+                    eprintln!("Output file already exists: {}", output_path);
+                    std::process::exit(1);
+                }
+            }
+
+            // after de-duplication, the original order is still preserved
+            let mut seen = HashSet::new();
+            let targets: Vec<String> = args.target.into_iter()
+                .filter(|item| seen.insert(item.clone()))
+                .collect();
+
+            // Calculate worker threads based on IP count
+            let ip_count = if targets.len() == 1 && args.multiple > 0 {
+                args.multiple as usize
+            } else {
+                targets.len()
+            };
+            let worker_threads = (ip_count +  1).max(1);
+
+            // Create tokio runtime with specific worker thread count
+            let rt = Builder::new_multi_thread()
+                .worker_threads(worker_threads)
+                .enable_all()
+                .build()?;
+
+            let res = rt.block_on(run_app(targets, args.count, args.interval, running.clone(), args.force_ipv6, args.multiple, args.view_type, args.output));
+
+            // if error print error message and exit
+            if let Err(err) = res {
+                eprintln!("{}", err);
+                std::process::exit(1);
+            }
         }
-    }
-
-
-
-    // after de-duplication, the original order is still preserved
-    let mut seen = HashSet::new();
-    let targets: Vec<String> = args.target.into_iter()
-        .filter(|item| seen.insert(item.clone()))
-        .collect();
-
-    // Calculate worker threads based on IP count
-    let ip_count = if targets.len() == 1 && args.multiple > 0 {
-        args.multiple as usize
-    } else {
-        targets.len()
-    };
-    let worker_threads = (ip_count +  1).max(1);
-
-    // Create tokio runtime with specific worker thread count
-    let rt = Builder::new_multi_thread()
-        .worker_threads(worker_threads)
-        .enable_all()
-        .build()?;
-
-    let res = rt.block_on(run_app(targets, args.count, args.interval, running.clone(), args.force_ipv6, args.multiple, args.view_type, args.output));
-
-    // if error print error message and exit
-    if let Err(err) = res {
-        eprintln!("{}", err);
-        std::process::exit(1);
     }
     Ok(())
 }
