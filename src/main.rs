@@ -5,6 +5,7 @@ mod ip_data;
 mod ui;
 mod ping_event;
 mod data_processor;
+mod metric;
 
 use clap::{Parser, Subcommand};
 use std::collections::{HashSet, VecDeque};
@@ -60,9 +61,9 @@ struct Args {
 enum Commands {
     /// Agent mode for monitoring
     Agent {
-        /// Target IP address or hostname to ping
-        #[arg(help = "target IP address or hostname to ping", required = true)]
-        target: String,
+        /// Target IP addresses or hostnames to ping
+        #[arg(help = "target IP addresses or hostnames to ping", required = true)]
+        target: Vec<String>,
 
         /// Interval in seconds between pings
         #[arg(short, long, default_value_t = 1, help = "Interval in seconds between pings")]
@@ -81,15 +82,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match args.command {
         Some(Commands::Agent { target, interval, port }) => {
-            println!("Agent mode activated!");
-            println!("Target: {}", target);
-            println!("Interval: {} seconds", interval);
-            if let Some(p) = port {
-                println!("Port: {}", p);
-            } else {
-                println!("Using ICMP ping (no port specified)");
+            // Create tokio runtime for agent mode
+            let rt = Builder::new_multi_thread()
+                .worker_threads(2) // Simple setup for agent mode
+                .enable_all()
+                .build()?;
+
+            let res = rt.block_on(run_agent_mode(target, interval, port));
+
+            // if error print error message and exit
+            if let Err(err) = res {
+                eprintln!("{}", err);
+                std::process::exit(1);
             }
-            // TODO: Implement agent mode functionality
         },
         None => {
             // Default ping mode
@@ -282,5 +287,114 @@ async fn run_app(
     // restore terminal
     draw::restore_terminal(&mut terminal_guard.lock().unwrap().terminal.as_mut().unwrap())?;
 
+    Ok(())
+}
+
+async fn run_agent_mode(
+    targets: Vec<String>,
+    interval: i32,
+    port: Option<u16>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // set Ctrl+C to exit
+    let running = Arc::new(Mutex::new(true));
+
+    // ping event channel (network -> data processor)
+    let (ping_event_tx, ping_event_rx) = mpsc::sync_channel::<PingEvent>(0);
+    
+    // ui data channel (data processor -> ui) - not used in agent mode but required for start_data_processor
+    let (ui_data_tx, _ui_data_rx) = mpsc::sync_channel::<IpData>(0);
+
+    let ping_event_tx = Arc::new(ping_event_tx);
+
+    // after de-duplication, the original order is still preserved
+    let mut seen = std::collections::HashSet::new();
+    let targets: Vec<String> = targets.into_iter()
+        .filter(|item| seen.insert(item.clone()))
+        .collect();
+
+    if targets.is_empty() {
+        return Err("No valid targets provided".into());
+    }
+
+    // Get IP addresses for all targets
+    let mut ips = Vec::new();
+    for target in &targets {
+        let ip = network::get_host_ipaddr(target, false)?;
+        ips.push(ip);
+    }
+
+    // Define initial data for all targets
+    let ip_data = Arc::new(Mutex::new(ips.iter().enumerate().map(|(i, _)| IpData {
+        ip: String::new(),
+        addr: targets[i].clone(),
+        rtts: VecDeque::new(),
+        last_attr: 0.0,
+        min_rtt: 0.0,
+        max_rtt: 0.0,
+        timeout: 0,
+        received: 0,
+        pop_count: 0,
+    }).collect::<Vec<_>>()));
+
+    // Start data processor - will handle metric recording logic
+    let targets_for_processor: Vec<(String, String)> = ips.iter().enumerate().map(|(i, ip)| {
+        (targets[i].clone(), ip.clone())
+    }).collect();
+    
+    start_data_processor(
+        ping_event_rx,
+        ui_data_tx,
+        targets_for_processor,
+        "agent".to_string(), // Use "agent" as view_type to distinguish from normal ping mode
+        running.clone(),
+    );
+
+    let errs = Arc::new(Mutex::new(Vec::new()));
+    let interval_ms = interval * 1000;
+    let mut tasks = Vec::new();
+
+    // Start ping tasks for all targets
+    for (i, ip) in ips.iter().enumerate() {
+        let ip = ip.clone();
+        let running_clone = running.clone();
+        let errs_clone = errs.clone();
+        let ping_event_tx_clone = ping_event_tx.clone();
+        let ip_data_clone = ip_data.clone();
+        
+        let task = task::spawn({
+            let mut data = ip_data_clone.lock().unwrap();
+            // update the ip
+            data[i].ip = ip.clone();
+            let addr = data[i].addr.clone();
+            drop(data);
+            
+            async move {
+                send_ping(
+                    addr, 
+                    ip, 
+                    errs_clone, 
+                    0, // count=0 for infinite ping in agent mode
+                    interval_ms, 
+                    running_clone, 
+                    ping_event_tx_clone
+                ).await.unwrap();
+            }
+        });
+        tasks.push(task);
+    }
+
+    println!("Agent mode started for {} target(s): {:?}", targets.len(), targets);
+    if let Some(p) = port {
+        println!("Monitoring port: {}", p);
+    }
+    println!("Ping interval: {} seconds", interval);
+    println!("Press Ctrl+C to stop");
+
+    // Wait for all ping tasks to complete
+    for task in tasks {
+        task.await?;
+    }
+    
+    println!("Agent mode stopped");
     Ok(())
 }

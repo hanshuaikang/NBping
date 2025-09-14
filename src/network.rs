@@ -95,11 +95,19 @@ impl PingTask {
         // star ping
         let stream = ping(options)?;
 
-        for _ in 0..self.count {
+        let mut ping_count = 0;
+        loop {
             // if ctrl+c is pressed, break the loop
             if !*self.running.lock().unwrap() {
                 break;
             }
+            
+            // if count is not 0, check if we've reached the limit
+            if self.count > 0 && ping_count >= self.count {
+                break;
+            }
+            
+            ping_count += 1;
             match stream.recv() {
                 Ok(result) => {
                     match result {

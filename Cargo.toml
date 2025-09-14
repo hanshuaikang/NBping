@@ -12,3 +12,7 @@ ratatui = "0.29.0"
 tokio = { version = "1.42.0", features = ["full"] }
 pinger="2.0.0"
 anyhow="1.0.89"
+prometheus = "0.13"
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "http1", "http2"] }
+http-body-util = "0.1"
