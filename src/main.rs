@@ -10,12 +10,13 @@ mod metric;
 use clap::{Parser, Subcommand};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
-use tokio::{task, runtime::Builder};
+use tokio::{task, runtime::Builder, signal};
 use crate::ip_data::IpData;
 use crate::ping_event::PingEvent;
-use crate::data_processor::start_data_processor;
+use crate::data_processor::{start_data_processor, start_data_processor_with_metrics};
 use std::sync::mpsc;
 use crate::network::send_ping;
+use crate::metric::{PrometheusMetrics, http_server};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -295,8 +296,33 @@ async fn run_agent_mode(
     interval: i32,
     port: Option<u16>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // set Ctrl+C to exit
+    // 创建 Prometheus metrics 收集器
+    let prometheus_metrics = Arc::new(PrometheusMetrics::new()?);
+
+    // 创建信号处理通道
     let running = Arc::new(Mutex::new(true));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let shutdown_tx = Arc::new(Mutex::new(Some(shutdown_tx)));
+
+    // 设置信号处理
+    let running_for_signal = running.clone();
+    let shutdown_tx_for_signal = shutdown_tx.clone();
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                println!("\nReceived Ctrl+C, shutting down gracefully...");
+                *running_for_signal.lock().unwrap() = false;
+                
+                // 发送关闭信号给 HTTP 服务器
+                if let Some(tx) = shutdown_tx_for_signal.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+            }
+            Err(err) => {
+                eprintln!("Unable to listen for shutdown signal: {}", err);
+            }
+        }
+    });
 
     // ping event channel (network -> data processor)
     let (ping_event_tx, ping_event_rx) = mpsc::sync_channel::<PingEvent>(0);
@@ -336,18 +362,31 @@ async fn run_agent_mode(
         pop_count: 0,
     }).collect::<Vec<_>>()));
 
-    // Start data processor - will handle metric recording logic
+    // Start data processor with Prometheus metrics - will handle metric recording logic
     let targets_for_processor: Vec<(String, String)> = ips.iter().enumerate().map(|(i, ip)| {
         (targets[i].clone(), ip.clone())
     }).collect();
     
-    start_data_processor(
+    start_data_processor_with_metrics(
         ping_event_rx,
         ui_data_tx,
         targets_for_processor,
         "agent".to_string(), // Use "agent" as view_type to distinguish from normal ping mode
         running.clone(),
+        prometheus_metrics.clone(),
     );
+
+    // 启动 HTTP metrics 服务器
+    let metrics_addr = "0.0.0.0:9090".parse()?;
+    let metrics_task = task::spawn(async move {
+        if let Err(e) = http_server::start_metrics_server(
+            prometheus_metrics,
+            metrics_addr,
+            shutdown_rx,
+        ).await {
+            eprintln!("Metrics server error: {}", e);
+        }
+    });
 
     let errs = Arc::new(Mutex::new(Vec::new()));
     let interval_ms = interval * 1000;
@@ -388,12 +427,16 @@ async fn run_agent_mode(
         println!("Monitoring port: {}", p);
     }
     println!("Ping interval: {} seconds", interval);
+    println!("Metrics server: http://0.0.0.0:9090/metrics");
     println!("Press Ctrl+C to stop");
 
     // Wait for all ping tasks to complete
     for task in tasks {
         task.await?;
     }
+    
+    // Wait for metrics server to shut down
+    metrics_task.await?;
     
     println!("Agent mode stopped");
     Ok(())
