@@ -39,17 +39,17 @@ impl Drop for RawModeGuard {
 
 #[derive(Parser, Debug)]
 #[command(
-    version = "v0.5.0",
+    version = "v0.6.0",
     author = "hanshuaikang<https://github.com/hanshuaikang>",
     about = "🏎  Nping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations"
 )]
 struct Args {
     /// Target IP address or hostname to ping
-    #[arg(help = "target IP address or hostname to ping")]
+    #[arg(help = "target IP address or hostname to ping", required = false)]
     target: Vec<String>,
 
     /// Number of pings to send, when count is 0, the maximum number of pings per address is calculated
-    #[arg(short, long, default_value_t = 65535, help = "Number of pings to send")]
+    #[arg(short, long, default_value_t = 0, help = "Number of pings to send")]
     count: usize,
 
     /// Interval in seconds between pings
@@ -365,10 +365,11 @@ async fn run_exporter_mode(
     println!("┌─────────────────────────────────────────────────────────");
     println!("│ Targets     : {} host(s)", targets.len());
     for (i, target) in targets.iter().enumerate() {
-        if i == 0 {
+        if i < 5 {
             println!("│             : {}", target);
-        } else {
-            println!("│             : {}", target);
+        } else if i == 5 {
+            println!("│             : ... ({} more)", targets.len() - 5);
+            break;
         }
     }
     println!("│ Interval    : {} seconds", interval);

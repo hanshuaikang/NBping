@@ -16,7 +16,7 @@
 
 [中文文档](./README_ZH.md)
 
-**[New Feature] 🚀 Nping Prometheus Exporter Now Supported**
+**[New Feature] 🛰️ Nping Prometheus Exporter Now Supported**
 
 Now, Nping supports exporting ping metrics to Prometheus format. You can use the exporter subcommand to start the exporter server. [Learn more](#exporter-mode)
 

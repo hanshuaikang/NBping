@@ -14,7 +14,7 @@
 <a href="https://trendshift.io/repositories/13472" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13472" alt="hanshuaikang%2FNping | Trendshift" style="width: 200px; height: 60px;" width="250" height="55"/></a>
 </p>
 
-**[新功能] Exporter 模式**
+**[新功能] 🛰️Exporter 模式**
 
 现在 Nping 支持通过将 Ping 指标数据通过 Prometheus 格式导出，你可以使用 Grafana 等工具进行可视化展示。
 

@@ -103,11 +103,13 @@ impl PingTask {
             }
             
             // if count is not 0, check if we've reached the limit
-            if self.count > 0 && ping_count >= self.count {
-                break;
+            if self.count > 0 {
+                if ping_count >= self.count {
+                    break;
+                }
+                ping_count += 1;
             }
-            
-            ping_count += 1;
+
             match stream.recv() {
                 Ok(result) => {
                     match result {
