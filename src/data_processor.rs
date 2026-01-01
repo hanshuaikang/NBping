@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, mpsc};
 use crate::ping_event::PingEvent;
 use crate::ip_data::IpData;
-use crate::metric::PrometheusMetrics;
 
 pub struct DataProcessor {
     data_map: HashMap<String, IpData>, // key: addr_ip
@@ -108,56 +107,6 @@ pub fn start_data_processor(
                             // UI channel closed, exit
                             break;
                         }
-                    }
-                },
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Continue checking running flag
-                    continue;
-                },
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    // Network tasks finished
-                    break;
-                }
-            }
-        }
-    });
-}
-
-pub fn start_data_processor_with_metrics(
-    ping_event_rx: mpsc::Receiver<PingEvent>,
-    ui_data_tx: mpsc::SyncSender<IpData>,
-    targets: Vec<(String, String)>,
-    view_type: String,
-    running: Arc<Mutex<bool>>,
-    metrics: Arc<PrometheusMetrics>,
-) {
-    std::thread::spawn(move || {
-        let mut processor = DataProcessor::new(&targets, &view_type);
-        
-        while *running.lock().unwrap() {
-            match ping_event_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok(event) => {
-                    // 记录到 Prometheus metrics
-                    match &event {
-                        PingEvent::Success { addr, ip, rtt, .. } => {
-                            metrics.record_ping_success(addr, ip, *rtt);
-                        },
-                        PingEvent::Timeout { addr, ip, .. } => {
-                            metrics.record_ping_timeout(addr, ip);
-                        },
-                    }
-                    
-                    // 处理事件更新 UI 数据（agent 模式下不需要，但保持兼容性）
-                    if view_type != "agent" {
-                        if let Some(updated_data) = processor.process_event(event) {
-                            if ui_data_tx.send(updated_data).is_err() {
-                                // UI channel closed, exit
-                                break;
-                            }
-                        }
-                    } else {
-                        // Agent 模式下只处理 metrics，不需要更新 UI 数据
-                        processor.process_event(event);
                     }
                 },
                 Err(mpsc::RecvTimeoutError::Timeout) => {

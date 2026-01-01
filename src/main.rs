@@ -5,18 +5,37 @@ mod ip_data;
 mod ui;
 mod ping_event;
 mod data_processor;
-mod metric;
+mod agent;
 
 use clap::{Parser, Subcommand};
 use std::collections::{HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use ratatui::crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use tokio::{task, runtime::Builder, signal};
 use crate::ip_data::IpData;
 use crate::ping_event::PingEvent;
-use crate::data_processor::{start_data_processor, start_data_processor_with_metrics};
+use crate::data_processor::start_data_processor;
 use std::sync::mpsc;
 use crate::network::send_ping;
-use crate::metric::{PrometheusMetrics, http_server};
+use crate::agent::{PrometheusMetrics, http_server, spawn_ping_workers};
+
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn new() -> std::io::Result<Self> {
+        enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -301,7 +320,7 @@ async fn run_agent_mode(
     let prometheus_metrics = Arc::new(PrometheusMetrics::new()?);
 
     // 创建信号处理通道
-    let running = Arc::new(Mutex::new(true));
+    let running = Arc::new(AtomicBool::new(true));
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let shutdown_tx = Arc::new(Mutex::new(Some(shutdown_tx)));
 
@@ -312,7 +331,7 @@ async fn run_agent_mode(
         match signal::ctrl_c().await {
             Ok(()) => {
                 println!("\nReceived Ctrl+C, shutting down gracefully...");
-                *running_for_signal.lock().unwrap() = false;
+                running_for_signal.store(false, Ordering::Relaxed);
                 
                 // 发送关闭信号给 HTTP 服务器
                 if let Some(tx) = shutdown_tx_for_signal.lock().unwrap().take() {
@@ -325,14 +344,6 @@ async fn run_agent_mode(
         }
     });
 
-    // ping event channel (network -> data processor)
-    let (ping_event_tx, ping_event_rx) = mpsc::sync_channel::<PingEvent>(0);
-    
-    // ui data channel (data processor -> ui) - not used in agent mode but required for start_data_processor
-    let (ui_data_tx, _ui_data_rx) = mpsc::sync_channel::<IpData>(0);
-
-    let ping_event_tx = Arc::new(ping_event_tx);
-
     // 去重目标地址，同时保留原始顺序
     let mut seen = std::collections::HashSet::new();
     let targets: Vec<String> = targets.into_iter()
@@ -344,83 +355,10 @@ async fn run_agent_mode(
     }
 
     // 解析目标地址为 IP 地址
-    let mut ips = Vec::new();
+    let mut target_pairs = Vec::new();
     for target in &targets {
         let ip = network::get_host_ipaddr(target, false)?;
-        ips.push(ip);
-    }
-
-    // Define initial data for all targets
-    let ip_data = Arc::new(Mutex::new(ips.iter().enumerate().map(|(i, _)| IpData {
-        ip: String::new(),
-        addr: targets[i].clone(),
-        rtts: VecDeque::new(),
-        last_attr: 0.0,
-        min_rtt: 0.0,
-        max_rtt: 0.0,
-        timeout: 0,
-        received: 0,
-        pop_count: 0,
-    }).collect::<Vec<_>>()));
-
-    // Start data processor with Prometheus metrics - will handle metric recording logic
-    let targets_for_processor: Vec<(String, String)> = ips.iter().enumerate().map(|(i, ip)| {
-        (targets[i].clone(), ip.clone())
-    }).collect();
-    
-    start_data_processor_with_metrics(
-        ping_event_rx,
-        ui_data_tx,
-        targets_for_processor,
-        "agent".to_string(), // Use "agent" as view_type to distinguish from normal ping mode
-        running.clone(),
-        prometheus_metrics.clone(),
-    );
-
-    // 启动 HTTP metrics 服务器
-    let metrics_addr = format!("0.0.0.0:{}", port).parse()?;
-    let metrics_task = task::spawn(async move {
-        if let Err(e) = http_server::start_metrics_server(
-            prometheus_metrics,
-            metrics_addr,
-            shutdown_rx,
-        ).await {
-            eprintln!("Metrics server error: {}", e);
-        }
-    });
-
-    let errs = Arc::new(Mutex::new(Vec::new()));
-    let interval_ms = interval * 1000;
-    let mut tasks = Vec::new();
-
-    // Start ping tasks for all targets
-    for (i, ip) in ips.iter().enumerate() {
-        let ip = ip.clone();
-        let running_clone = running.clone();
-        let errs_clone = errs.clone();
-        let ping_event_tx_clone = ping_event_tx.clone();
-        let ip_data_clone = ip_data.clone();
-        
-        let task = task::spawn({
-            let mut data = ip_data_clone.lock().unwrap();
-            // update the ip
-            data[i].ip = ip.clone();
-            let addr = data[i].addr.clone();
-            drop(data);
-            
-            async move {
-                send_ping(
-                    addr, 
-                    ip, 
-                    errs_clone, 
-                    0, // count=0 for infinite ping in agent mode
-                    interval_ms, 
-                    running_clone, 
-                    ping_event_tx_clone
-                ).await.unwrap();
-            }
-        });
-        tasks.push(task);
+        target_pairs.push((target.clone(), ip));
     }
 
     println!("🚀 NPing Agent Mode Started");
@@ -436,16 +374,78 @@ async fn run_agent_mode(
     println!("│ Interval    : {} seconds", interval);
     println!("│ Metrics port: {}", port);
     println!("│ Metrics     : http://0.0.0.0:{}/metrics", port);
-    println!("│ Actions     : Press Ctrl+C to stop");
+    println!("│ Actions     : Press Ctrl+C or q to stop");
     println!("└─────────────────────────────────────────────────────────");
 
-    // Wait for all ping tasks to complete
-    for task in tasks {
-        task.await?;
-    }
+    // 启动 HTTP metrics 服务器
+    let metrics_addr = format!("0.0.0.0:{}", port).parse()?;
+    let metrics_for_server = prometheus_metrics.clone();
+    let metrics_task = task::spawn(async move {
+        http_server::start_metrics_server(
+            metrics_for_server,
+            metrics_addr,
+            shutdown_rx,
+        ).await
+    });
+
+    let interval_ms = interval * 1000;
+    let ping_threads = spawn_ping_workers(
+        target_pairs,
+        Duration::from_millis(interval_ms as u64),
+        running.clone(),
+        prometheus_metrics.clone(),
+    );
+
+    // Listen for q/esc to exit (agent mode only)
+    let running_for_key = running.clone();
+    let shutdown_tx_for_key = shutdown_tx.clone();
+    let key_listener = std::thread::spawn(move || {
+        let _raw_mode = match RawModeGuard::new() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+
+        while running_for_key.load(Ordering::Relaxed) {
+            if let Ok(true) = event::poll(Duration::from_millis(50)) {
+                if let Ok(Event::Key(key)) = event::read() {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            running_for_key.store(false, Ordering::Relaxed);
+                            if let Some(tx) = shutdown_tx_for_key.lock().unwrap().take() {
+                                let _ = tx.send(());
+                            }
+                            break;
+                        }
+                        KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
+                            running_for_key.store(false, Ordering::Relaxed);
+                            if let Some(tx) = shutdown_tx_for_key.lock().unwrap().take() {
+                                let _ = tx.send(());
+                            }
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    });
 
     // Wait for metrics server to shut down
-    metrics_task.await?;
+    let metrics_result = metrics_task.await?;
+    let metrics_error = metrics_result.err();
+
+    running.store(false, Ordering::Relaxed);
+
+    // Wait for ping threads to complete
+    for handle in ping_threads {
+        let _ = handle.join();
+    }
+
+    let _ = key_listener.join();
+
+    if let Some(err) = metrics_error {
+        return Err(err);
+    }
 
     println!("✅ NPing Agent Mode Stopped");
     Ok(())
