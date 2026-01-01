@@ -70,9 +70,9 @@ enum Commands {
         #[arg(short, long, default_value_t = 1, help = "Interval in seconds between pings")]
         interval: i32,
 
-        /// Port to monitor (default: ICMP ping, no port specified)
-        #[arg(short, long, help = "Port to monitor")]
-        port: Option<u16>,
+        /// Prometheus metrics HTTP port
+        #[arg(short, long, default_value_t = 9090, help = "Prometheus metrics HTTP port")]
+        port: u16,
     },
 }
 
@@ -83,9 +83,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match args.command {
         Some(Commands::Agent { target, interval, port }) => {
+            let worker_threads = (target.len() + 1).max(1);
             // Create tokio runtime for agent mode
             let rt = Builder::new_multi_thread()
-                .worker_threads(2) // Simple setup for agent mode
+                .worker_threads(worker_threads)
                 .enable_all()
                 .build()?;
 
@@ -294,7 +295,7 @@ async fn run_app(
 async fn run_agent_mode(
     targets: Vec<String>,
     interval: i32,
-    port: Option<u16>,
+    port: u16,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 创建 Prometheus metrics 收集器
     let prometheus_metrics = Arc::new(PrometheusMetrics::new()?);
@@ -332,7 +333,7 @@ async fn run_agent_mode(
 
     let ping_event_tx = Arc::new(ping_event_tx);
 
-    // after de-duplication, the original order is still preserved
+    // 去重目标地址，同时保留原始顺序
     let mut seen = std::collections::HashSet::new();
     let targets: Vec<String> = targets.into_iter()
         .filter(|item| seen.insert(item.clone()))
@@ -342,7 +343,7 @@ async fn run_agent_mode(
         return Err("No valid targets provided".into());
     }
 
-    // Get IP addresses for all targets
+    // 解析目标地址为 IP 地址
     let mut ips = Vec::new();
     for target in &targets {
         let ip = network::get_host_ipaddr(target, false)?;
@@ -377,7 +378,7 @@ async fn run_agent_mode(
     );
 
     // 启动 HTTP metrics 服务器
-    let metrics_addr = "0.0.0.0:9090".parse()?;
+    let metrics_addr = format!("0.0.0.0:{}", port).parse()?;
     let metrics_task = task::spawn(async move {
         if let Err(e) = http_server::start_metrics_server(
             prometheus_metrics,
@@ -422,22 +423,30 @@ async fn run_agent_mode(
         tasks.push(task);
     }
 
-    println!("Agent mode started for {} target(s): {:?}", targets.len(), targets);
-    if let Some(p) = port {
-        println!("Monitoring port: {}", p);
+    println!("🚀 NPing Agent Mode Started");
+    println!("┌─────────────────────────────────────────────────────────");
+    println!("│ Targets     : {} host(s)", targets.len());
+    for (i, target) in targets.iter().enumerate() {
+        if i == 0 {
+            println!("│             : {}", target);
+        } else {
+            println!("│             : {}", target);
+        }
     }
-    println!("Ping interval: {} seconds", interval);
-    println!("Metrics server: http://0.0.0.0:9090/metrics");
-    println!("Press Ctrl+C to stop");
+    println!("│ Interval    : {} seconds", interval);
+    println!("│ Metrics port: {}", port);
+    println!("│ Metrics     : http://0.0.0.0:{}/metrics", port);
+    println!("│ Actions     : Press Ctrl+C to stop");
+    println!("└─────────────────────────────────────────────────────────");
 
     // Wait for all ping tasks to complete
     for task in tasks {
         task.await?;
     }
-    
+
     // Wait for metrics server to shut down
     metrics_task.await?;
-    
-    println!("Agent mode stopped");
+
+    println!("✅ NPing Agent Mode Stopped");
     Ok(())
 }
