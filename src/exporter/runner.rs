@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use pinger::{ping, PingOptions, PingResult};
 
-use crate::agent::PrometheusMetrics;
+use crate::exporter::PrometheusMetrics;
 
 pub fn spawn_ping_workers(
     targets: Vec<(String, String)>,

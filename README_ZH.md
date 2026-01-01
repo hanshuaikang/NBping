@@ -14,6 +14,16 @@
 <a href="https://trendshift.io/repositories/13472" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13472" alt="hanshuaikang%2FNping | Trendshift" style="width: 200px; height: 60px;" width="250" height="55"/></a>
 </p>
 
+**[新功能] Exporter 模式**
+
+现在 Nping 支持通过将 Ping 指标数据通过 Prometheus 格式导出，你可以使用 Grafana 等工具进行可视化展示。
+
+```bash
+nping exporter www.baidu.com www.google.com -i 1 -p 9100
+```
+Then, you can scrape the metrics from `http://localhost:9100/metrics`
+
+
 **图表视图**
 <p align="center">
     <img src="docs/imgs/black.gif" alt="Nping demo" width="100%">
@@ -35,6 +45,19 @@
     <img src="docs/imgs/sparkline.gif" alt="Nping demo" width="100%">
 </p>
 
+** Exporter 模式 **
+现在 Nping 支持通过将 Ping 指标数据通过 Prometheus 格式导出，你可以使用 Grafana 等工具进行可视化展示。
+
+```bash
+nping exporter www.baidu.com www.google.com -i 1 -p 9100
+```
+然后你可以访问获取这些数据 `http://localhost:9100/metrics`
+
+你可以通过 Grafana 来可视化这些数据
+<p align="center">
+    <img src="docs/imgs/grafana.png" alt="Nping demo" width="100%"> 
+</p>
+
 
 ## Installation
 
@@ -46,14 +69,9 @@ brew install nping
 nping --help
 ```
 
-
 ## Feature:
-- 支持多地址并发同时 Ping
-- 支持可视化延迟展示
-- 实时最大最小平均延迟丢包率等指标展示
-- 支持 IpV4 和 IpV6
-- 支持一个地址下并发 Ping n 个 ip
-- 支持输出结果到文件
+- TCP Ping 支持
+- IP 段 Ping 支持
 
 ## 后续的计划:
 - UI 界面优化, 增加更多的动态效果
@@ -81,6 +99,26 @@ Options:
   -o, --output <OUTPUT>        Output file to save ping results
   -h, --help                   Print help
   -V, --version                Print version
+```
+
+
+### Exporter Usage
+
+```bash
+nping exporter www.baidu.com www.google.com -i 1 -p 9100
+
+./nping exporter --help
+Exporter mode for monitoring
+
+Usage: nping exporter [OPTIONS] <TARGET>...
+
+Arguments:
+  <TARGET>...  target IP addresses or hostnames to ping
+
+Options:
+  -i, --interval <INTERVAL>  Interval in seconds between pings [default: 1]
+  -p, --port <PORT>          Prometheus metrics HTTP port [default: 9090]
+  -h, --help                 Print help
 ```
 
 ## 致谢

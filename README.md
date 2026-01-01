@@ -16,6 +16,15 @@
 
 [中文文档](./README_ZH.md)
 
+**[New Feature] 🚀 Nping Prometheus Exporter Now Supported**
+
+Now, Nping supports exporting ping metrics to Prometheus format. You can use the exporter subcommand to start the exporter server. [Learn more](#exporter-mode)
+
+```bash
+nping exporter www.baidu.com www.google.com -i 1 -p 9100
+```
+Then, you can scrape the metrics from `http://localhost:9100/metrics`
+
 **Graph View**
 <p align="center">
     <img src="docs/imgs/black.gif" alt="Nping demo" width="100%">
@@ -37,6 +46,21 @@
 </p>
 
 
+#### Exporter Mode
+Now Nping supports exporting ping metrics to Prometheus format. you can use exporter subcommand to start the exporter server.
+
+```bash
+nping exporter www.baidu.com www.google.com -i 1 -p 9100
+```
+Then, you can scrape the metrics from `http://localhost:9100/metrics`
+
+You can use grafana to visualize the data
+<p align="center">
+    <img src="docs/imgs/grafana.png" alt="Nping demo" width="100%"> 
+</p>
+
+
+
 ## Installation
 
 #### MacOS Homebrew
@@ -48,12 +72,8 @@ nping --help
 ```
 
 ## Feature:
-- Supports concurrent Ping for multiple addresses
-- Supports visual latency display
-- Real-time display of maximum, minimum, average latency, packet loss rate, and other metrics
-- Support IpV4 and IpV6
-- Supports concurrent pinging of n ip's under one address.
-- Support output results to files
+- TCP Ping support
+- IP range Ping support
 
 ## Roadmap:
 - Optimize UI interface, add more dynamic effects.
@@ -83,6 +103,26 @@ Options:
   -V, --version                Print version
 
 ```
+
+### Exporter Usage
+
+```bash
+nping exporter www.baidu.com www.google.com -i 1 -p 9100
+
+./nping exporter --help
+Exporter mode for monitoring
+
+Usage: nping exporter [OPTIONS] <TARGET>...
+
+Arguments:
+  <TARGET>...  target IP addresses or hostnames to ping
+
+Options:
+  -i, --interval <INTERVAL>  Interval in seconds between pings [default: 1]
+  -p, --port <PORT>          Prometheus metrics HTTP port [default: 9090]
+  -h, --help                 Print help
+```
+
 
 ## Acknowledgements
 Thanks to these people for their feedback and suggestions for 🏎Nping!

@@ -5,7 +5,7 @@ mod ip_data;
 mod ui;
 mod ping_event;
 mod data_processor;
-mod agent;
+mod exporter;
 
 use clap::{Parser, Subcommand};
 use std::collections::{HashSet, VecDeque};
@@ -20,7 +20,7 @@ use crate::ping_event::PingEvent;
 use crate::data_processor::start_data_processor;
 use std::sync::mpsc;
 use crate::network::send_ping;
-use crate::agent::{PrometheusMetrics, http_server, spawn_ping_workers};
+use crate::exporter::{PrometheusMetrics, http_server, spawn_ping_workers};
 
 struct RawModeGuard;
 
@@ -79,8 +79,8 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Agent mode for monitoring
-    Agent {
+    /// Exporter mode for monitoring
+    Exporter {
         /// Target IP addresses or hostnames to ping
         #[arg(help = "target IP addresses or hostnames to ping", required = true)]
         target: Vec<String>,
@@ -101,15 +101,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     match args.command {
-        Some(Commands::Agent { target, interval, port }) => {
+        Some(Commands::Exporter { target, interval, port }) => {
             let worker_threads = (target.len() + 1).max(1);
-            // Create tokio runtime for agent mode
+            // Create tokio runtime for Exporter mode
             let rt = Builder::new_multi_thread()
                 .worker_threads(worker_threads)
                 .enable_all()
                 .build()?;
 
-            let res = rt.block_on(run_agent_mode(target, interval, port));
+            let res = rt.block_on(run_exporter_mode(target, interval, port));
 
             // if error print error message and exit
             if let Err(err) = res {
@@ -311,7 +311,7 @@ async fn run_app(
     Ok(())
 }
 
-async fn run_agent_mode(
+async fn run_exporter_mode(
     targets: Vec<String>,
     interval: i32,
     port: u16,
@@ -361,7 +361,7 @@ async fn run_agent_mode(
         target_pairs.push((target.clone(), ip));
     }
 
-    println!("🚀 NPing Agent Mode Started");
+    println!("🚀 NPing Prometheus Exporter Mode Started");
     println!("┌─────────────────────────────────────────────────────────");
     println!("│ Targets     : {} host(s)", targets.len());
     for (i, target) in targets.iter().enumerate() {
@@ -396,7 +396,7 @@ async fn run_agent_mode(
         prometheus_metrics.clone(),
     );
 
-    // Listen for q/esc to exit (agent mode only)
+    // Listen for q/esc to exit (exporter mode only)
     let running_for_key = running.clone();
     let shutdown_tx_for_key = shutdown_tx.clone();
     let key_listener = std::thread::spawn(move || {
@@ -447,6 +447,5 @@ async fn run_agent_mode(
         return Err(err);
     }
 
-    println!("✅ NPing Agent Mode Stopped");
     Ok(())
 }
