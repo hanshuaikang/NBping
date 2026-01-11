@@ -113,7 +113,7 @@ pub fn draw_table_view<B: Backend>(
     )
         .header(header)
         .block(Block::default()
-            .title("🏎  Nping Table (Sort by: Loss Rate ↑ then Latency ↑)"))
+            .title("🏎  NBping Table (Sort by: Loss Rate ↑ then Latency ↑)"))
         .row_highlight_style(selected_style)
         .highlight_symbol(">> ");
 

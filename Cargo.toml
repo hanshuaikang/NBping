@@ -1,9 +1,9 @@
 [package]
-name = "nping"
+name = "nbping"
 version = "0.6.0"
 edition = "2021"
 license = "MIT License"
-description = "Nping is a Ping tool developed in Rust. It supports concurrent Ping for multiple addresses, visual chart display, real-time data updates, and other features."
+description = "NBping is a Ping tool developed in Rust. It supports concurrent Ping for multiple addresses, visual chart display, real-time data updates, and other features."
 authors = ["hanshuaikang https://github.com/hanshuaikang"]
 
 [dependencies]

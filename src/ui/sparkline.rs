@@ -28,7 +28,7 @@ pub fn draw_sparkline_view<B: Backend>(
         .split(area);
 
     let legend = Line::from(vec![
-        Span::styled(" 🏎  Nping SparkLine View ", Style::default().fg(Color::Cyan)),
+        Span::styled(" 🏎  NBping SparkLine View ", Style::default().fg(Color::Cyan)),
         Span::raw("("),
         Span::raw(" Blank area means timeout or error"),
         Span::raw(")"),

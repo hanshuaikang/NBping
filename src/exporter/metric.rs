@@ -176,9 +176,9 @@ pub mod http_server {
             }
             (&Method::GET, "/") => {
                 let body = r#"<html>
-<head><title>NPing Metrics</title></head>
+<head><title>NBPing Metrics</title></head>
 <body>
-<h1>NPing Metrics</h1>
+<h1>NBPing Metrics</h1>
 <p><a href='/metrics'>Metrics</a></p>
 </body>
 </html>"#;

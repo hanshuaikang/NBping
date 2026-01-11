@@ -41,7 +41,7 @@ impl Drop for RawModeGuard {
 #[command(
     version = "v0.6.0",
     author = "hanshuaikang<https://github.com/hanshuaikang>",
-    about = "🏎  Nping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations"
+    about = "🏎  NBping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations"
 )]
 struct Args {
     /// Target IP address or hostname to ping
@@ -361,7 +361,7 @@ async fn run_exporter_mode(
         target_pairs.push((target.clone(), ip));
     }
 
-    println!("🚀 NPing Prometheus Exporter Mode Started");
+    println!("🚀 NBPing Prometheus Exporter Mode Started");
     println!("┌─────────────────────────────────────────────────────────");
     println!("│ Targets     : {} host(s)", targets.len());
     for (i, target) in targets.iter().enumerate() {

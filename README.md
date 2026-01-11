@@ -1,10 +1,10 @@
-<h1 align="center"> 🏎 Nping </h1>
+<h1 align="center"> 🏎 NBping </h1>
 <p align="center">
-    <em>Nping is a Ping tool developed in Rust. It supports concurrent Ping for multiple addresses, visual chart display, real-time data updates, and other features.</em>
+    <em>NBping is a Ping tool developed in Rust. It supports concurrent Ping for multiple addresses, visual chart display, real-time data updates, and other features.</em>
 </p>
 
 <p align="center">
-    <img src="docs/imgs/nb.gif" alt="Nping demo" width="30%">
+    <img src="docs/imgs/nb.gif" alt="NBping demo" width="30%">
 </p>
 
 <p align="center">
@@ -16,47 +16,47 @@
 
 [中文文档](./README_ZH.md)
 
-**[New Feature] 🛰️ Nping Prometheus Exporter Now Supported**
+**[New Feature] 🛰️ NBping Prometheus Exporter Now Supported**
 
-Now, Nping supports exporting ping metrics to Prometheus format. You can use the exporter subcommand to start the exporter server. [Learn more](#exporter-mode)
+Now, NBping supports exporting ping metrics to Prometheus format. You can use the exporter subcommand to start the exporter server. [Learn more](#exporter-mode)
 
 ```bash
-nping exporter www.baidu.com www.google.com -i 1 -p 9100
+nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 ```
 Then, you can scrape the metrics from `http://localhost:9100/metrics`
 
 **Graph View**
 <p align="center">
-    <img src="docs/imgs/black.gif" alt="Nping demo" width="100%">
+    <img src="docs/imgs/black.gif" alt="NBping demo" width="100%">
 </p>
 
 **Table View**
 <p align="center">
-    <img src="docs/imgs/table.gif" alt="Nping demo" width="100%">
+    <img src="docs/imgs/table.gif" alt="NBping demo" width="100%">
 </p>
 
 **Point View**
 <p align="center">
-    <img src="docs/imgs/point.gif" alt="Nping demo" width="100%">
+    <img src="docs/imgs/point.gif" alt="NBping demo" width="100%">
 </p>
 
 **Sparkline View**
 <p align="center">
-    <img src="docs/imgs/sparkline.gif" alt="Nping demo" width="100%">
+    <img src="docs/imgs/sparkline.gif" alt="NBping demo" width="100%">
 </p>
 
 
 #### Exporter Mode
-Now Nping supports exporting ping metrics to Prometheus format. you can use exporter subcommand to start the exporter server.
+Now NBping supports exporting ping metrics to Prometheus format. you can use exporter subcommand to start the exporter server.
 
 ```bash
-nping exporter www.baidu.com www.google.com -i 1 -p 9100
+nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 ```
 Then, you can scrape the metrics from `http://localhost:9100/metrics`
 
 You can use grafana to visualize the data
 <p align="center">
-    <img src="docs/imgs/grafana.png" alt="Nping demo" width="100%"> 
+    <img src="docs/imgs/grafana.png" alt="NBping demo" width="100%"> 
 </p>
 
 
@@ -65,10 +65,10 @@ You can use grafana to visualize the data
 
 #### MacOS Homebrew
 ```bash
-brew tap hanshuaikang/nping
-brew install nping
+brew tap hanshuaikang/nbping
+brew install nbping
 
-nping --help
+nbping --help
 ```
 
 ## Feature:
@@ -81,13 +81,13 @@ nping --help
 ## Usage
 
 ```bash
-nping www.baidu.com www.google.com www.apple.com www.sina.com -c 20 -i 2
+nbping www.baidu.com www.google.com www.apple.com www.sina.com -c 20 -i 2
 
-nping --help
+nbping --help
 
-🏎  Nping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations
+🏎  NBping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations
 
-Usage: nping [OPTIONS] <TARGET>...
+Usage: nbping [OPTIONS] <TARGET>...
 
 Arguments:
   <TARGET>...  target IP address or hostname to ping
@@ -107,12 +107,12 @@ Options:
 ### Exporter Usage
 
 ```bash
-nping exporter www.baidu.com www.google.com -i 1 -p 9100
+nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 
-./nping exporter --help
+./nbping exporter --help
 Exporter mode for monitoring
 
-Usage: nping exporter [OPTIONS] <TARGET>...
+Usage: nbping exporter [OPTIONS] <TARGET>...
 
 Arguments:
   <TARGET>...  target IP addresses or hostnames to ping
@@ -125,12 +125,12 @@ Options:
 
 
 ## Acknowledgements
-Thanks to these people for their feedback and suggestions for 🏎Nping!
+Thanks to these people for their feedback and suggestions for 🏎NBping!
 
 | [ThatFlower](https://github.com/ThatFlower) | [zx4i](https://github.com/zx4i) | [snail2sky](https://github.com/snail2sky) | [shenshouer](https://github.com/shenshouer) | [vnt-dev](https://github.com/vnt-dev) | [qingyuan0o0](https://github.com/qingyuan0o0) 
 | [Onlywzr](https://github.com/Onlywzr)
 
-Thanks to these self-media for reposting and paying attention to 🏎Nping!
+Thanks to these self-media for reposting and paying attention to 🏎NBping!
 
 | [阮一峰的网络日志](https://www.ruanyifeng.com/blog/weekly/) |[Rust 中文社区](https://rustcc.cn/) | [公众号:奇妙的linux世界](https://mp.weixin.qq.com/s/lK_OqKp2yY8lDBoyLxtdGA) | [公众号:IT运维技术圈](https://mp.weixin.qq.com/s/bDJZ-H02dIKG3R7LQCeyaQ)
 | [X:@geekbb](https://x.com/geekbb/status/1875754541905539510) | [公众号:一飞开源](https://mp.weixin.qq.com/s/BZjr54h8dIQgzr8UW3fwOQ) | [公众号: 开源日记](https://mp.weixin.qq.com/s/uGtkD4x_XOFyKNbIy5pHYA)
