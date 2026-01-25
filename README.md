@@ -16,6 +16,19 @@
 
 [中文文档](./README_ZH.md)
 
+📢 **NBPing (formerly Nping)**
+
+> [!IMPORTANT]
+> **Renaming Notice**
+>
+> This project has been officially renamed from **Nping** to **NBPing**.
+>
+> Please update your bookmarks, dependencies, and installation scripts accordingly. The old name is now deprecated and will no longer be maintained.
+> ```bash
+> nbping --help
+> ```
+
+
 **[New Feature] 🛰️ NBping Prometheus Exporter Now Supported**
 
 Now, NBping supports exporting ping metrics to Prometheus format. You can use the exporter subcommand to start the exporter server. [Learn more](#exporter-mode)

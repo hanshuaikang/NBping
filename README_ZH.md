@@ -14,6 +14,18 @@
 <a href="https://trendshift.io/repositories/13472" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13472" alt="hanshuaikang%2FNBping | Trendshift" style="width: 200px; height: 60px;" width="250" height="55"/></a>
 </p>
 
+📢 **Nping 现在已经更名为 NBPing(nbping)**
+
+> [!IMPORTANT]
+> **更名通知**
+>
+> 本项目已从 **Nping** 正式更名为 **NBPing**。
+>
+> 请相应更新您的书签、依赖项和安装脚本。旧名称现已弃用,不再维护。
+> ```bash
+> nbping --help
+> ```
+
 **[新功能] 🛰️Exporter 模式**
 
 现在 NBping 支持通过将 Ping 指标数据通过 Prometheus 格式导出，你可以使用 Grafana 等工具进行可视化展示。
