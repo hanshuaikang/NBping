@@ -78,7 +78,6 @@ You can use grafana to visualize the data
 
 #### MacOS Homebrew
 ```bash
-brew tap hanshuaikang/nbping
 brew install nbping
 
 nbping --help

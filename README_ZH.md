@@ -75,7 +75,6 @@ nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 
 #### MacOS Homebrew
 ```bash
-brew tap hanshuaikang/nbping
 brew install nbping
 
 nbping --help
