@@ -6,10 +6,11 @@ mod ui;
 mod ping_event;
 mod data_processor;
 mod exporter;
+mod view;
 
 use clap::{Parser, Subcommand};
 use std::collections::{HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyModifiers};
@@ -21,6 +22,7 @@ use crate::data_processor::start_data_processor;
 use std::sync::mpsc;
 use crate::network::send_ping;
 use crate::exporter::{PrometheusMetrics, http_server, spawn_ping_workers};
+use crate::view::View;
 
 struct RawModeGuard;
 
@@ -67,7 +69,7 @@ struct Args {
     )]
     multiple: i32,
 
-    #[arg(short, long, default_value = "graph", help = "View mode graph/table/point/sparkline")]
+    #[arg(short, long, default_value = "graph", help = "Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab)")]
     view_type: String,
 
     #[arg(short = 'o', long = "output", help = "Output file to save ping results")]
@@ -179,16 +181,13 @@ async fn run_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
 
     // init terminal
-    draw::init_terminal()?;
-
-    // Create terminal instance
-    let terminal = draw::init_terminal().unwrap();
+    let terminal = draw::init_terminal()?;
     let terminal_guard = Arc::new(Mutex::new(terminal::TerminalGuard::new(terminal)));
 
 
     // ping event channel (network -> data processor)
     let (ping_event_tx, ping_event_rx) = mpsc::sync_channel::<PingEvent>(0);
-    
+
     // ui data channel (data processor -> ui)
     let (ui_data_tx, ui_data_rx) = mpsc::sync_channel::<IpData>(0);
 
@@ -226,35 +225,23 @@ async fn run_app(
         let addr = if targets.len() == 1 { targets[0].clone() } else { targets[i].clone() };
         (addr, ip.clone())
     }).collect();
-    
+
     start_data_processor(
         ping_event_rx,
         ui_data_tx,
         targets_for_processor,
-        view_type.clone(),
         running.clone(),
     );
 
-    let view_type = Arc::new(view_type);
+    let initial_view = View::from_str(&view_type).unwrap_or(View::Graph);
+    let view_slot = Arc::new(AtomicU8::new(initial_view as u8));
+    let theme_slot = Arc::new(AtomicU8::new(0));
 
     let errs = Arc::new(Mutex::new(Vec::new()));
 
     let interval = if interval == 0 { 500 } else { interval * 1000 };
     let mut tasks = Vec::new();
 
-
-    // first draw ui
-    {
-        let mut guard = terminal_guard.lock().unwrap();
-        let ip_data = ip_data.lock().unwrap();
-
-        draw::draw_interface(
-            &mut guard.terminal.as_mut().unwrap(),
-            &view_type,
-            &ip_data,
-            &mut errs.lock().unwrap(),
-        ).ok();
-    }
     for (i, ip) in ips.iter().enumerate() {
         let ip = ip.clone();
         let running = running.clone();
@@ -277,21 +264,23 @@ async fn run_app(
     // Spawn UI task in background
     let running_for_ui = running.clone();
     let terminal_guard_for_ui = terminal_guard.clone();
-    let view_type_for_ui = view_type.clone();
+    let view_slot_for_ui = view_slot.clone();
+    let theme_slot_for_ui = theme_slot.clone();
     let ip_data_for_ui = ip_data.clone();
     let errs_for_ui = errs.clone();
-    
-    let ui_task = task::spawn(async move {
+
+    let ui_task = task::spawn_blocking(move || {
         let mut guard = terminal_guard_for_ui.lock().unwrap();
-        draw::draw_interface_with_updates(
+        let _ = draw::draw_interface_with_updates(
             &mut guard.terminal.as_mut().unwrap(),
-            &view_type_for_ui,
+            view_slot_for_ui,
+            theme_slot_for_ui,
             &ip_data_for_ui,
             ui_data_rx,
             running_for_ui,
             errs_for_ui,
             output_file,
-        ).ok();
+        );
     });
 
     // Wait for all ping tasks to complete

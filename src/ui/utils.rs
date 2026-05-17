@@ -1,9 +1,10 @@
 use std::collections::VecDeque;
-use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::prelude::{Color, Line, Span, Style};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::prelude::{Line, Span, Style};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+
+use crate::ui::theme::Theme;
 
 pub fn calculate_avg_rtt(rtt: &VecDeque<f64>) -> f64 {
     if !rtt.is_empty() {
@@ -37,33 +38,36 @@ pub fn calculate_loss_pkg(timeout: usize, received: usize) -> f64 {
     }
 }
 
-pub fn draw_errors_section<B: Backend>(
+pub fn draw_errors_section(
     f: &mut Frame,
     errs: &[String],
     area: Rect,
+    theme: &Theme,
 ) {
+    if errs.is_empty() {
+        return;
+    }
+
     let recent_errors: Vec<Line> = errs
         .iter()
         .rev()
         .take(5)
         .map(|err| {
             Line::from(vec![
-                Span::styled("⚠ ", Style::default().fg(Color::Yellow)),
-                Span::styled(err, Style::default().fg(Color::Red))
+                Span::styled("⚠ ", Style::default().fg(theme.warning)),
+                Span::styled(err.clone(), Style::default().fg(theme.danger)),
             ])
         })
         .collect();
 
-    if errs.is_empty() {
-        let blank_line = Line::from(vec![]);
-        let blank_paragraph = Paragraph::new(blank_line).block(Block::default());
-        f.render_widget(blank_paragraph, area);
-    } else {
-        let errors_paragraph = Paragraph::new(recent_errors)
-            .block(Block::default()
-                .title("🚨Recent Errors:")
-                .borders(Borders::ALL))
-            .wrap(Wrap { trim: true });
-        f.render_widget(errors_paragraph, area);
-    }
+    let errors_paragraph = Paragraph::new(recent_errors)
+        .block(
+            Block::default()
+                .title(" 🚨 recent errors ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme.danger)),
+        )
+        .wrap(Wrap { trim: true });
+    f.render_widget(errors_paragraph, area);
 }

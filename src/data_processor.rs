@@ -3,18 +3,16 @@ use std::sync::{Arc, Mutex, mpsc};
 use crate::ping_event::PingEvent;
 use crate::ip_data::IpData;
 
+pub const RTT_RETENTION: usize = 200;
+
 pub struct DataProcessor {
     data_map: HashMap<String, IpData>, // key: addr_ip
     point_num: usize,
 }
 
 impl DataProcessor {
-    pub fn new(targets: &[(String, String)], view_type: &str) -> Self {
-        let point_num = if view_type == "point" || view_type == "sparkline" {
-            200
-        } else {
-            10
-        };
+    pub fn new(targets: &[(String, String)]) -> Self {
+        let point_num = RTT_RETENTION;
         let mut data_map = HashMap::new();
         
         for (addr, ip) in targets {
@@ -93,11 +91,10 @@ pub fn start_data_processor(
     ping_event_rx: mpsc::Receiver<PingEvent>,
     ui_data_tx: mpsc::SyncSender<IpData>,
     targets: Vec<(String, String)>,
-    view_type: String,
     running: Arc<Mutex<bool>>,
 ) {
     std::thread::spawn(move || {
-        let mut processor = DataProcessor::new(&targets, &view_type);
+        let mut processor = DataProcessor::new(&targets);
         
         while *running.lock().unwrap() {
             match ping_event_rx.recv_timeout(std::time::Duration::from_millis(100)) {

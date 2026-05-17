@@ -1,139 +1,140 @@
-use ratatui::backend::Backend;
-use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::prelude::{Color, Line, Span, Style};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::prelude::{Line, Span, Style};
+use ratatui::style::Modifier;
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::Frame;
+
 use crate::ip_data::IpData;
+use crate::ui::theme::Theme;
 use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_loss_pkg, draw_errors_section};
 
-pub fn get_loss_color_and_emoji(loss_rate: f64) -> Color {
-    if loss_rate > 50.0 {
-        Color::Red
-    } else if loss_rate > 0.0 {
-        Color::Yellow
-    } else {
-        Color::Green
-    }
-}
-
-pub fn draw_point_view<B: Backend>(
+pub fn draw_point_view(
     f: &mut Frame,
     ip_data: &[IpData],
     errs: &[String],
     area: Rect,
+    theme: &Theme,
 ) {
-    let data = ip_data.to_vec();
-
-    // Calculate how much vertical space each IP will take (increased to account for multiple lines if needed)
-    let ip_height = 5; // Increased to accommodate potential multi-line display
-    let total_height = (data.len() * ip_height) + 2; // +2 for margins
+    let ip_height: u16 = 5;
+    let total_height = (ip_data.len() as u16) * ip_height + 2;
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Length(total_height as u16),
-            Constraint::Min(6),        // For errors section
-        ].as_ref())
+            Constraint::Length(1),               // legend
+            Constraint::Length(total_height),    // ip blocks
+            Constraint::Min(6),                  // errors
+        ])
         .split(area);
 
-    // draw legend
     let legend = Line::from(vec![
-        Span::styled(" 🏎  NBping Point View ", Style::default().fg(Color::Cyan)),
-        Span::raw("("),
-        Span::styled("•", Style::default().fg(Color::Green)),
-        Span::raw(" Healthy, "),
-        Span::styled("↑", Style::default().fg(Color::Yellow)),
-        Span::raw(" High Latency (over 80% of max), "),
-        Span::styled("✗", Style::default().fg(Color::Red)),
-        Span::raw(" Timeout)"),
+        Span::styled(
+            " Point View ",
+            Style::default()
+                .fg(theme.primary)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("(", Style::default().fg(theme.dim)),
+        Span::styled("●", Style::default().fg(theme.success)),
+        Span::styled(" healthy  ", Style::default().fg(theme.dim)),
+        Span::styled("▲", Style::default().fg(theme.warning)),
+        Span::styled(" slow  ", Style::default().fg(theme.dim)),
+        Span::styled("✗", Style::default().fg(theme.danger)),
+        Span::styled(" timeout", Style::default().fg(theme.dim)),
+        Span::styled(")", Style::default().fg(theme.dim)),
     ]);
-
-    let legend_paragraph = Paragraph::new(legend);
-    f.render_widget(legend_paragraph, chunks[0]);
-
-    let ip_area = chunks[1];
+    f.render_widget(Paragraph::new(legend), chunks[0]);
 
     let ip_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Length(ip_height as u16); data.len()])
+        .constraints(vec![Constraint::Length(ip_height); ip_data.len()])
         .margin(1)
-        .split(ip_area);
+        .split(chunks[1]);
 
-
-    for (i, ip) in data.iter().enumerate() {
+    for (i, ip) in ip_data.iter().enumerate() {
         let avg_rtt = calculate_avg_rtt(&ip.rtts);
         let jitter = calculate_jitter(&ip.rtts);
         let loss_pkg = calculate_loss_pkg(ip.timeout, ip.received);
-        let loss_pkg_color = get_loss_color_and_emoji(loss_pkg);
+        let loss_color = theme.loss_color(loss_pkg);
+        let plot_max = ip.max_rtt.max(1.0);
 
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.border))
+            .title(Line::from(vec![
+                Span::styled(
+                    format!(" ◆ {} ", ip.addr),
+                    Style::default()
+                        .fg(theme.primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{} ", ip.ip), Style::default().fg(theme.dim)),
+            ]));
+        let inner = block.inner(ip_chunks[i]);
+        f.render_widget(block, ip_chunks[i]);
 
-        // Create the info line (row 1) with all metrics from table view
-        let info_line = Line::from(vec![
-            Span::raw("Target: "),
-            Span::styled(format!("{} ", ip.addr), Style::default().fg(Color::Green)),
-            Span::raw("Ip: "),
-            Span::styled(format!("{} ", ip.ip), Style::default().fg(Color::Green)),
-            Span::raw("Last: "),
+        let inner_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(inner);
+
+        let last_str = if ip.last_attr == 0.0 {
+            "< 0.01ms".to_string()
+        } else if ip.last_attr == -1.0 {
+            "timeout".to_string()
+        } else {
+            format!("{:.2}ms", ip.last_attr)
+        };
+        let last_color = if ip.last_attr == -1.0 {
+            theme.danger
+        } else {
+            theme.rtt_color(ip.last_attr, plot_max)
+        };
+
+        let info = Line::from(vec![
+            Span::styled("last ", Style::default().fg(theme.dim)),
             Span::styled(
-                if ip.last_attr == 0.0 {
-                    "< 0.01ms".to_string()
-                } else if ip.last_attr == -1.0 {
-                    "0.0ms".to_string()
-                } else {
-                    format!("{:.2}ms", ip.last_attr)
-                },
-                Style::default().fg(Color::Green)
+                last_str,
+                Style::default().fg(last_color).add_modifier(Modifier::BOLD),
             ),
-            Span::raw(" Avg: "),
-            Span::styled(format!("{:.2}ms", avg_rtt), Style::default().fg(Color::Green)),
-            Span::raw(" Max: "),
-            Span::styled(format!("{:.2}ms", ip.max_rtt), Style::default().fg(Color::Green)),
-            Span::raw(" Min: "),
-            Span::styled(format!("{:.2}ms", ip.min_rtt), Style::default().fg(Color::Green)),
-            Span::raw(" Jitter: "),
-            Span::styled(format!("{:.2}ms", jitter), Style::default().fg(Color::Green)),
-            Span::raw(" Loss: "),
-            Span::styled(format!("{:.2}%", loss_pkg), Style::default().fg(loss_pkg_color)), ]);
+            Span::styled("  avg ", Style::default().fg(theme.dim)),
+            Span::styled(format!("{:.2}ms", avg_rtt), Style::default().fg(theme.secondary)),
+            Span::styled("  max ", Style::default().fg(theme.dim)),
+            Span::styled(format!("{:.2}ms", ip.max_rtt), Style::default().fg(theme.warning)),
+            Span::styled("  min ", Style::default().fg(theme.dim)),
+            Span::styled(format!("{:.2}ms", ip.min_rtt), Style::default().fg(theme.success)),
+            Span::styled("  jit ", Style::default().fg(theme.dim)),
+            Span::styled(format!("{:.2}ms", jitter), Style::default().fg(theme.secondary)),
+            Span::styled("  loss ", Style::default().fg(theme.dim)),
+            Span::styled(
+                format!("{:.2}%", loss_pkg),
+                Style::default().fg(loss_color).add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        f.render_widget(Paragraph::new(info).wrap(Wrap { trim: true }), inner_chunks[0]);
 
-        let mut points_spans = Vec::new();
+        let mut points_spans: Vec<Span> = Vec::new();
         for &rtt in &ip.rtts {
             if rtt < 0.0 {
-                // Timeout/packet loss - red X
-                points_spans.push(Span::styled("✗", Style::default().fg(Color::Red)));
-            } else if rtt > ip.max_rtt * 0.8 {
-                // High latency () - yellow dot
-                points_spans.push(Span::styled("↑", Style::default().fg(Color::Yellow)));
+                points_spans.push(Span::styled("✗", Style::default().fg(theme.danger)));
+            } else if rtt > plot_max * 0.8 {
+                points_spans.push(Span::styled(
+                    "▲",
+                    Style::default().fg(theme.rtt_color(rtt, plot_max)),
+                ));
             } else {
-                // Normal latency - green dot
-                points_spans.push(Span::styled("•", Style::default().fg(Color::Green)));
+                points_spans.push(Span::styled(
+                    "●",
+                    Style::default().fg(theme.rtt_color(rtt, plot_max)),
+                ));
             }
-            points_spans.push(Span::raw(" ")); // Space between points
+            points_spans.push(Span::raw(" "));
         }
-
-        // Create the block for this IP's data
-        let ip_block = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),  // Info line
-                Constraint::Min(4), // Points area with enough space for multiple lines
-            ].as_ref())
-            .split(ip_chunks[i]);
-
-        // Render the info line
-        let info_paragraph = Paragraph::new(info_line).wrap(Wrap { trim: true });
-        f.render_widget(info_paragraph, ip_block[0]);
-
-
-        let points_line = Line::from(points_spans);
-        let points_paragraph = Paragraph::new(points_line)
-            .wrap(Wrap { trim: true })     // Use false to avoid trimming spaces
-            .block(Block::default());       // Adding a block can help with wrapping behavior
-
-        f.render_widget(points_paragraph, ip_block[1]);
+        let points_para = Paragraph::new(Line::from(points_spans)).wrap(Wrap { trim: true });
+        f.render_widget(points_para, inner_chunks[1]);
     }
 
-    // Draw errors section at the bottom
-    let errors_chunk = chunks[1];
-    draw_errors_section::<B>(f, errs, errors_chunk);
+    let errors_chunk = chunks.last().unwrap();
+    draw_errors_section(f, errs, *errors_chunk, theme);
 }
