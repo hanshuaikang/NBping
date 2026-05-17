@@ -30,6 +30,18 @@ pub fn calculate_jitter(rtt: &VecDeque<f64>) -> f64 {
     }
 }
 
+pub fn calculate_p95(rtt: &VecDeque<f64>) -> f64 {
+    let mut valid: Vec<f64> = rtt.iter().copied().filter(|&r| r >= 0.0).collect();
+    if valid.is_empty() {
+        return 0.0;
+    }
+    valid.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let idx = ((valid.len() as f64 * 0.95).ceil() as usize)
+        .saturating_sub(1)
+        .min(valid.len() - 1);
+    valid[idx]
+}
+
 pub fn calculate_loss_pkg(timeout: usize, received: usize) -> f64 {
     if timeout > 0 {
         (timeout as f64 / (received as f64 + timeout as f64)) * 100.0

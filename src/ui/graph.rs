@@ -6,7 +6,7 @@ use ratatui::{symbols, Frame};
 
 use crate::ip_data::IpData;
 use crate::ui::theme::Theme;
-use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, draw_errors_section};
+use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_p95, draw_errors_section};
 
 const GRAPH_WINDOW: usize = 60;
 const MIN_CHART_WIDTH: u16 = 48;
@@ -106,6 +106,7 @@ fn render_target(f: &mut Frame, area: Rect, data: &IpData, theme: &Theme) {
 
     let avg_rtt = calculate_avg_rtt(&data.rtts);
     let jitter = calculate_jitter(&data.rtts);
+    let p95 = calculate_p95(&data.rtts);
 
     let metric_pair = |k: &'static str, v: String, color: ratatui::style::Color| -> Vec<Span<'static>> {
         vec![
@@ -133,6 +134,7 @@ fn render_target(f: &mut Frame, area: Rect, data: &IpData, theme: &Theme) {
     spans.extend(metric_pair("avg ", format!("{:.2}ms", avg_rtt), theme.secondary));
     spans.extend(metric_pair("jit ", format!("{:.2}ms", jitter), theme.secondary));
     spans.extend(metric_pair("max ", format!("{:.2}ms", data.max_rtt), theme.warning));
+    spans.extend(metric_pair("p95 ", format!("{:.2}ms", p95), theme.warning));
     spans.extend(metric_pair("min ", format!("{:.2}ms", data.min_rtt), theme.success));
     spans.extend(metric_pair("loss ", format!("{:.2}%", loss_pkg), loss_color));
 

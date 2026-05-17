@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use crate::ip_data::IpData;
 use crate::ui::theme::Theme;
-use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_loss_pkg, draw_errors_section};
+use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_loss_pkg, calculate_p95, draw_errors_section};
 
 pub fn draw_point_view(
     f: &mut Frame,
@@ -54,6 +54,7 @@ pub fn draw_point_view(
     for (i, ip) in ip_data.iter().enumerate() {
         let avg_rtt = calculate_avg_rtt(&ip.rtts);
         let jitter = calculate_jitter(&ip.rtts);
+        let p95 = calculate_p95(&ip.rtts);
         let loss_pkg = calculate_loss_pkg(ip.timeout, ip.received);
         let loss_color = theme.loss_color(loss_pkg);
         let plot_max = ip.max_rtt.max(1.0);
@@ -102,6 +103,8 @@ pub fn draw_point_view(
             Span::styled(format!("{:.2}ms", avg_rtt), Style::default().fg(theme.secondary)),
             Span::styled("  max ", Style::default().fg(theme.dim)),
             Span::styled(format!("{:.2}ms", ip.max_rtt), Style::default().fg(theme.warning)),
+            Span::styled("  p95 ", Style::default().fg(theme.dim)),
+            Span::styled(format!("{:.2}ms", p95), Style::default().fg(theme.warning)),
             Span::styled("  min ", Style::default().fg(theme.dim)),
             Span::styled(format!("{:.2}ms", ip.min_rtt), Style::default().fg(theme.success)),
             Span::styled("  jit ", Style::default().fg(theme.dim)),

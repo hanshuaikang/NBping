@@ -5,7 +5,7 @@ use ratatui::Frame;
 
 use crate::ip_data::IpData;
 use crate::ui::theme::Theme;
-use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_loss_pkg, draw_errors_section};
+use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_loss_pkg, calculate_p95, draw_errors_section};
 
 pub fn draw_table_view(
     f: &mut Frame,
@@ -41,7 +41,7 @@ pub fn draw_table_view(
         .add_modifier(Modifier::BOLD);
 
     let header = Row::new(vec![
-        "Rank", "Target", "IP", "Last", "Avg", "Max", "Min", "Jitter", "Loss",
+        "Rank", "Target", "IP", "Last", "Avg", "Max", "P95", "Min", "Jitter", "Loss",
     ])
     .style(header_style)
     .height(1);
@@ -50,6 +50,7 @@ pub fn draw_table_view(
     let rows = sortable.iter().enumerate().map(|(index, &(orig, loss_pkg, avg_rtt))| {
         let d = &ip_data[orig];
         let jitter = calculate_jitter(&d.rtts);
+        let p95 = calculate_p95(&d.rtts);
 
         let rank = match index {
             0 => "🥇",
@@ -74,6 +75,7 @@ pub fn draw_table_view(
             last_str,
             format!("{:.2}ms", avg_rtt),
             format!("{:.2}ms", d.max_rtt),
+            format!("{:.2}ms", p95),
             format!("{:.2}ms", d.min_rtt),
             format!("{:.2}ms", jitter),
             format!("{:.2}%", loss_pkg),
@@ -95,6 +97,7 @@ pub fn draw_table_view(
             Constraint::Length(5),
             Constraint::Percentage(20),
             Constraint::Percentage(20),
+            Constraint::Length(12),
             Constraint::Length(12),
             Constraint::Length(12),
             Constraint::Length(12),
