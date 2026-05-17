@@ -41,7 +41,7 @@ impl Drop for RawModeGuard {
 
 #[derive(Parser, Debug)]
 #[command(
-    version = "v0.6.1",
+    version = "v0.7.0",
     author = "hanshuaikang<https://github.com/hanshuaikang>",
     about = "🏎  NBping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations"
 )]
