@@ -14,6 +14,11 @@
 <a href="https://trendshift.io/repositories/13472" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13472" alt="hanshuaikang%2FNping | Trendshift" style="width: 200px; height: 60px;" width="250" height="55"/></a>
 </p>
 
+
+<p align="center">
+    <img src="docs/imgs/views.gif" alt="NBping demo" width="100%">
+</p>
+
 [中文文档](./README_ZH.md)
 
 📢 **NBPing (formerly Nping)**
@@ -29,49 +34,19 @@
 > ```
 
 
-**[New Feature] 🛰️ NBping Prometheus Exporter Now Supported**
+**Exporter Mode**
 
-Now, NBping supports exporting ping metrics to Prometheus format. You can use the exporter subcommand to start the exporter server. [Learn more](#exporter-mode)
-
-```bash
-nbping exporter www.baidu.com www.google.com -i 1 -p 9100
-```
-Then, you can scrape the metrics from `http://localhost:9100/metrics`
-
-**Graph View**
-<p align="center">
-    <img src="docs/imgs/black.gif" alt="NBping demo" width="100%">
-</p>
-
-**Table View**
-<p align="center">
-    <img src="docs/imgs/table.gif" alt="NBping demo" width="100%">
-</p>
-
-**Point View**
-<p align="center">
-    <img src="docs/imgs/point.gif" alt="NBping demo" width="100%">
-</p>
-
-**Sparkline View**
-<p align="center">
-    <img src="docs/imgs/sparkline.gif" alt="NBping demo" width="100%">
-</p>
-
-
-#### Exporter Mode
-Now NBping supports exporting ping metrics to Prometheus format. you can use exporter subcommand to start the exporter server.
+Now NBping supports exporting ping metrics to Prometheus format, so you can visualize them with tools like Grafana.
 
 ```bash
 nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 ```
 Then, you can scrape the metrics from `http://localhost:9100/metrics`
 
-You can use grafana to visualize the data
+You can use Grafana to visualize the data:
 <p align="center">
     <img src="docs/imgs/grafana.png" alt="NBping demo" width="100%"> 
 </p>
-
 
 
 ## Installation

@@ -14,6 +14,11 @@
 <a href="https://trendshift.io/repositories/13472" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13472" alt="hanshuaikang%2FNBping | Trendshift" style="width: 200px; height: 60px;" width="250" height="55"/></a>
 </p>
 
+
+<p align="center">
+    <img src="docs/imgs/views.gif" alt="NBping demo" width="100%">
+</p>
+
 📢 **Nping 现在已经更名为 NBPing(nbping)**
 
 > [!IMPORTANT]
@@ -26,36 +31,6 @@
 > nbping --help
 > ```
 
-**[新功能] 🛰️Exporter 模式**
-
-现在 NBping 支持通过将 Ping 指标数据通过 Prometheus 格式导出，你可以使用 Grafana 等工具进行可视化展示。
-
-```bash
-nbping exporter www.baidu.com www.google.com -i 1 -p 9100
-```
-Then, you can scrape the metrics from `http://localhost:9100/metrics`
-
-
-**图表视图**
-<p align="center">
-    <img src="docs/imgs/black.gif" alt="NBping demo" width="100%">
-</p>
-
-
-**表格视图**
-<p align="center">
-    <img src="docs/imgs/table.gif" alt="NBping demo" width="100%">
-</p>
-
-**点视图**
-<p align="center">
-    <img src="docs/imgs/point.gif" alt="NBping demo" width="100%">
-</p>
-
-**Sparkline 视图**
-<p align="center">
-    <img src="docs/imgs/sparkline.gif" alt="NBping demo" width="100%">
-</p>
 
 ** Exporter 模式 **
 现在 NBping 支持通过将 Ping 指标数据通过 Prometheus 格式导出，你可以使用 Grafana 等工具进行可视化展示。
