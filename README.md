@@ -58,6 +58,42 @@ brew install nbping
 nbping --help
 ```
 
+#### Nix/NixOS
+
+For users with Nix installed, you can use NBping without installing it:
+
+```bash
+# Run directly
+nix run github:hanshuaikang/Nping
+
+# Try it in a temporary shell
+nix shell github:hanshuaikang/Nping
+nbping --version
+
+# Add to your NixOS configuration or home-manager
+{
+  environment.systemPackages = [
+    inputs.nbping.packages.${system}.default
+  ];
+}
+```
+
+To build from source with Nix:
+
+```bash
+nix build
+nix run . -- --version
+```
+
+For development:
+
+```bash
+nix develop
+cargo build
+```
+
+For maintainers updating the flake, see [docs/maintaining-nix-flake.md](docs/maintaining-nix-flake.md).
+
 ## Feature:
 - TCP Ping support
 - IP range Ping support
