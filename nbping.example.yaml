@@ -1,0 +1,47 @@
+# NBping configuration file example.
+#
+# Usage:  nbping --config nbping.yaml
+#
+# Precedence: command-line flags override values set here, which in turn
+# override the built-in defaults  ->  CLI flag > YAML config > default.
+# Unknown keys are rejected, so a typo'd field name is a hard error.
+
+# Execution mode: "tui" (interactive charts, default) or "exporter" (Prometheus).
+mode: tui
+
+# Targets to ping (IP addresses or hostnames). Required (here or on the CLI).
+targets:
+  - google.com
+  - github.com
+  - cloudflare.com
+  - apple.com
+  - x.com
+  - baidu.com
+  - 1.1.1.1
+  - 8.8.8.8
+
+# Number of pings to send. 0 = unlimited. (default: 0)
+count: 0
+
+# Interval between pings, in seconds.
+#   tui mode:      default 0, where 0 means 500ms.
+#   exporter mode: default 1; a value <= 0 is treated as 1 (no busy-loop).
+interval: 1
+
+# Force using IPv6. Note: the -6 CLI flag can only turn this ON; to keep it off
+# while a config enables it, set this to false here. (default: false)
+force_ipv6: false
+
+# tui mode only: with a single target, resolve up to this many A/AAAA records
+# and ping them all in parallel. (default: 0 = disabled)
+multiple: 0
+
+# tui mode only: initial view. One of graph | table | point | sparkline.
+# Switch at runtime with keys 1-4 / Tab. (default: graph)
+view_type: graph
+
+# tui mode only: file to save ping results to. Must not already exist.
+# output: results.log
+
+# exporter mode only: Prometheus metrics HTTP port. (default: 9090)
+port: 9090

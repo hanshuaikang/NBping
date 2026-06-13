@@ -107,6 +107,43 @@ Options:
   -h, --help                 Print help
 ```
 
+### 配置文件
+
+除了命令行参数，你也可以通过 `--config` 从 YAML 文件启动 NBping：
+
+```bash
+nbping --config nbping.yaml
+```
+
+配置文件的字段与命令行参数一一对应，完整示例见 [`nbping.example.yaml`](nbping.example.yaml)：
+
+```yaml
+mode: tui              # tui | exporter（默认 tui）
+targets:
+  - google.com
+  - github.com
+  - apple.com
+  - baidu.com
+  - 1.1.1.1
+count: 0               # 0 = 不限次数
+interval: 1            # 间隔秒数
+force_ipv6: false
+multiple: 0            # 仅 tui 模式
+view_type: graph       # graph | table | point | sparkline（仅 tui 模式）
+# output: results.log  # 仅 tui 模式
+port: 9090             # 仅 exporter 模式
+```
+
+说明：
+
+- **优先级：** 命令行参数 > YAML 配置 > 内置默认值。例如
+  `nbping --config nbping.yaml -i 1` 会强制使用 1 秒间隔，无视配置文件中的值。
+- **模式：** 未使用子命令时，由 `mode` 字段决定走 TUI 还是 exporter 模式；显式执行
+  `nbping exporter ...` 子命令则始终为 exporter 模式。
+- **`force_ipv6`：** `-6` 命令行 flag 只能开启 IPv6；若配置文件已开启而想关闭，请在文件中设置
+  `force_ipv6: false`。
+- 未知字段会被拒绝，因此拼写错误会在启动时直接报错。
+
 ## 致谢
 感谢这些朋友对 NBping 提出的反馈和建议。
 

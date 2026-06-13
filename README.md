@@ -110,6 +110,47 @@ Options:
   -h, --help                 Print help
 ```
 
+### Configuration file
+
+Instead of passing everything on the command line, you can start NBping from a
+YAML file with `--config`:
+
+```bash
+nbping --config nbping.yaml
+```
+
+The file mirrors the command-line flags. See [`nbping.example.yaml`](nbping.example.yaml):
+
+```yaml
+mode: tui              # tui | exporter (default: tui)
+targets:
+  - google.com
+  - github.com
+  - apple.com
+  - baidu.com
+  - 1.1.1.1
+count: 0               # 0 = unlimited
+interval: 1            # seconds
+force_ipv6: false
+multiple: 0            # tui mode only
+view_type: graph       # graph | table | point | sparkline (tui mode only)
+# output: results.log  # tui mode only
+port: 9090             # exporter mode only
+```
+
+Notes:
+
+- **Precedence:** command-line flags override the config file, which overrides
+  built-in defaults (`CLI flag > YAML config > default`). For example,
+  `nbping --config nbping.yaml -i 1` forces a 1-second interval regardless of the
+  file.
+- **Mode:** the `mode` field selects TUI or exporter mode when no subcommand is
+  given. Running the explicit `nbping exporter ...` subcommand always uses
+  exporter mode.
+- **`force_ipv6`:** the `-6` flag can only turn IPv6 *on*; to disable IPv6 while a
+  config enables it, set `force_ipv6: false` in the file.
+- Unknown keys are rejected, so typos surface as errors at startup.
+
 
 ## Acknowledgements
 Thanks to these people for their feedback and suggestions for 🏎NBping!

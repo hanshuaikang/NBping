@@ -7,9 +7,10 @@ mod ping_event;
 mod data_processor;
 mod exporter;
 mod view;
+mod config;
 
 use clap::{Parser, Subcommand};
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,6 +24,7 @@ use std::sync::mpsc;
 use crate::network::send_ping;
 use crate::exporter::{PrometheusMetrics, http_server, spawn_ping_workers};
 use crate::view::View;
+use crate::config::{FileConfig, Mode};
 
 struct RawModeGuard;
 
@@ -50,27 +52,30 @@ struct Args {
     #[arg(help = "target IP address or hostname to ping", required = false)]
     target: Vec<String>,
 
+    /// Path to a YAML config file (CLI flags override values from this file)
+    #[arg(long, global = true, help = "Path to a YAML config file (CLI flags override its values)")]
+    config: Option<String>,
+
     /// Number of pings to send, when count is 0, the maximum number of pings per address is calculated
-    #[arg(short, long, default_value_t = 0, help = "Number of pings to send")]
-    count: usize,
+    #[arg(short, long, help = "Number of pings to send [default: 0 = unlimited]")]
+    count: Option<usize>,
 
     /// Interval in seconds between pings
-    #[arg(short, long, default_value_t = 0, help = "Interval in seconds between pings")]
-    interval: i32,
+    #[arg(short, long, help = "Interval in seconds between pings [default: 0]")]
+    interval: Option<i32>,
 
-    #[clap(long = "force_ipv6", default_value_t = false, short = '6', help = "Force using IPv6")]
+    #[clap(long = "force_ipv6", default_value_t = false, short = '6', global = true, help = "Force using IPv6 (config-only field can also enable this)")]
     pub force_ipv6: bool,
 
     #[arg(
         short = 'm',
         long,
-        default_value_t = 0,
-        help = "Specify the maximum number of target addresses, Only works on one target address"
+        help = "Specify the maximum number of target addresses, Only works on one target address [default: 0]"
     )]
-    multiple: i32,
+    multiple: Option<i32>,
 
-    #[arg(short, long, default_value = "graph", help = "Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab)")]
-    view_type: String,
+    #[arg(short, long, help = "Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]")]
+    view_type: Option<String>,
 
     #[arg(short = 'o', long = "output", help = "Output file to save ping results")]
     output: Option<String>,
@@ -84,16 +89,16 @@ enum Commands {
     /// Exporter mode for monitoring
     Exporter {
         /// Target IP addresses or hostnames to ping
-        #[arg(help = "target IP addresses or hostnames to ping", required = true)]
+        #[arg(help = "target IP addresses or hostnames to ping", required = false)]
         target: Vec<String>,
 
         /// Interval in seconds between pings
-        #[arg(short, long, default_value_t = 1, help = "Interval in seconds between pings")]
-        interval: i32,
+        #[arg(short, long, help = "Interval in seconds between pings [default: 1]")]
+        interval: Option<i32>,
 
         /// Prometheus metrics HTTP port
-        #[arg(short, long, default_value_t = 9090, help = "Prometheus metrics HTTP port")]
-        port: u16,
+        #[arg(short, long, help = "Prometheus metrics HTTP port [default: 9090]")]
+        port: Option<u16>,
     },
 }
 
@@ -102,68 +107,111 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // parse command line arguments
     let args = Args::parse();
 
-    match args.command {
-        Some(Commands::Exporter { target, interval, port }) => {
-            let worker_threads = (target.len() + 1).max(1);
-            // Create tokio runtime for Exporter mode
-            let rt = Builder::new_multi_thread()
-                .worker_threads(worker_threads)
-                .enable_all()
-                .build()?;
-
-            let res = rt.block_on(run_exporter_mode(target, interval, port));
-
-            // if error print error message and exit
-            if let Err(err) = res {
-                eprintln!("{}", err);
+    // Load the YAML config file when one was provided. Values from it act as a
+    // baseline that command-line flags override (CLI > YAML > built-in default).
+    let file_cfg = match &args.config {
+        Some(path) => match FileConfig::load(path) {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                eprintln!("Error: {:#}", err);
                 std::process::exit(1);
             }
         },
-        None => {
-            // Default ping mode
-            if args.target.is_empty() {
-                eprintln!("Error: target IP address or hostname is required");
+        None => FileConfig::default(),
+    };
+
+    // Decide which mode to run:
+    //  - an explicit `exporter` subcommand always wins
+    //  - otherwise the config file's `mode` field decides (defaulting to tui)
+    let run_exporter = match &args.command {
+        Some(Commands::Exporter { .. }) => true,
+        None => match file_cfg.mode() {
+            Ok(mode) => mode == Mode::Exporter,
+            Err(err) => {
+                eprintln!("Error: {:#}", err);
                 std::process::exit(1);
             }
+        },
+    };
 
-            // set Ctrl+C and q and esc to exit
-            let running = Arc::new(Mutex::new(true));
+    if run_exporter {
+        // Exporter mode is reachable two ways: the `exporter` subcommand (with its
+        // own target/interval/port) or top-level flags alongside `--config mode: exporter`.
+        let (sub_target, sub_interval, sub_port) = match args.command {
+            Some(Commands::Exporter { target, interval, port }) => (target, interval, port),
+            None => (Vec::new(), None, None),
+        };
+        let cfg = config::resolve_exporter(
+            sub_target,
+            sub_interval,
+            sub_port,
+            args.target,
+            args.interval,
+            args.force_ipv6,
+            &file_cfg,
+        );
+        if cfg.targets.is_empty() {
+            eprintln!("Error: at least one target is required (via CLI or config 'targets')");
+            std::process::exit(1);
+        }
 
-            // check output file
-            if let Some(ref output_path) = args.output {
-                if std::path::Path::new(output_path).exists() {
-                    eprintln!("Output file already exists: {}", output_path);
-                    std::process::exit(1);
-                }
-            }
+        let worker_threads = (cfg.targets.len() + 1).max(1);
+        let rt = Builder::new_multi_thread()
+            .worker_threads(worker_threads)
+            .enable_all()
+            .build()?;
 
-            // after de-duplication, the original order is still preserved
-            let mut seen = HashSet::new();
-            let targets: Vec<String> = args.target.into_iter()
-                .filter(|item| seen.insert(item.clone()))
-                .collect();
+        let res = rt.block_on(run_exporter_mode(cfg.targets, cfg.interval, cfg.port, cfg.force_ipv6));
+        if let Err(err) = res {
+            eprintln!("{}", err);
+            std::process::exit(1);
+        }
+    } else {
+        // Default TUI ping mode. Resolve every value as CLI > YAML > default.
+        let cfg = config::resolve_tui(
+            args.target,
+            args.count,
+            args.interval,
+            args.force_ipv6,
+            args.multiple,
+            args.view_type,
+            args.output,
+            &file_cfg,
+        );
+        if cfg.targets.is_empty() {
+            eprintln!("Error: at least one target is required (via CLI or config 'targets')");
+            std::process::exit(1);
+        }
 
-            // Calculate worker threads based on IP count
-            let ip_count = if targets.len() == 1 && args.multiple > 0 {
-                args.multiple as usize
-            } else {
-                targets.len()
-            };
-            let worker_threads = (ip_count +  1).max(1);
+        // set Ctrl+C and q and esc to exit
+        let running = Arc::new(Mutex::new(true));
 
-            // Create tokio runtime with specific worker thread count
-            let rt = Builder::new_multi_thread()
-                .worker_threads(worker_threads)
-                .enable_all()
-                .build()?;
-
-            let res = rt.block_on(run_app(targets, args.count, args.interval, running.clone(), args.force_ipv6, args.multiple, args.view_type, args.output));
-
-            // if error print error message and exit
-            if let Err(err) = res {
-                eprintln!("{}", err);
+        // check output file
+        if let Some(ref output_path) = cfg.output {
+            if std::path::Path::new(output_path).exists() {
+                eprintln!("Output file already exists: {}", output_path);
                 std::process::exit(1);
             }
+        }
+
+        // Calculate worker threads based on IP count
+        let ip_count = if cfg.targets.len() == 1 && cfg.multiple > 0 {
+            cfg.multiple as usize
+        } else {
+            cfg.targets.len()
+        };
+        let worker_threads = (ip_count + 1).max(1);
+
+        // Create tokio runtime with specific worker thread count
+        let rt = Builder::new_multi_thread()
+            .worker_threads(worker_threads)
+            .enable_all()
+            .build()?;
+
+        let res = rt.block_on(run_app(cfg.targets, cfg.count, cfg.interval, running.clone(), cfg.force_ipv6, cfg.multiple, cfg.view_type, cfg.output));
+        if let Err(err) = res {
+            eprintln!("{}", err);
+            std::process::exit(1);
         }
     }
     Ok(())
@@ -304,6 +352,7 @@ async fn run_exporter_mode(
     targets: Vec<String>,
     interval: i32,
     port: u16,
+    force_ipv6: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 创建 Prometheus metrics 收集器
     let prometheus_metrics = Arc::new(PrometheusMetrics::new()?);
@@ -333,12 +382,8 @@ async fn run_exporter_mode(
         }
     });
 
-    // 去重目标地址，同时保留原始顺序
-    let mut seen = std::collections::HashSet::new();
-    let targets: Vec<String> = targets.into_iter()
-        .filter(|item| seen.insert(item.clone()))
-        .collect();
-
+    // Targets are already de-duplicated and non-empty by the time they reach
+    // here (see config::resolve_exporter), but guard defensively.
     if targets.is_empty() {
         return Err("No valid targets provided".into());
     }
@@ -346,7 +391,7 @@ async fn run_exporter_mode(
     // 解析目标地址为 IP 地址
     let mut target_pairs = Vec::new();
     for target in &targets {
-        let ip = network::get_host_ipaddr(target, false)?;
+        let ip = network::get_host_ipaddr(target, force_ipv6)?;
         target_pairs.push((target.clone(), ip));
     }
 
