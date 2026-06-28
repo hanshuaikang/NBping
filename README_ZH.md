@@ -77,11 +77,12 @@ Arguments:
   <TARGET>...  target IP address or hostname to ping
 
 Options:
-  -c, --count <COUNT>          Number of pings to send [default: 65535]
+      --config <CONFIG>        Path to a YAML config file (CLI flags override its values)
+  -c, --count <COUNT>          Number of pings to send [default: 0 = unlimited]
   -i, --interval <INTERVAL>    Interval in seconds between pings [default: 0]
-  -6, --force_ipv6             Force using IPv6
+  -6, --force_ipv6             Force using IPv6 (config-only field can also enable this)
   -m, --multiple <MULTIPLE>    Specify the maximum number of target addresses, Only works on one target address [default: 0]
-  -v, --view-type <VIEW_TYPE>  View mode graph/table/point/sparkline [default: graph]
+  -v, --view-type <VIEW_TYPE>  Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]
   -o, --output <OUTPUT>        Output file to save ping results
   -h, --help                   Print help
   -V, --version                Print version
@@ -96,16 +97,55 @@ nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 ./nbping exporter --help
 Exporter mode for monitoring
 
-Usage: nbping exporter [OPTIONS] <TARGET>...
+Usage: nbping exporter [OPTIONS] [TARGET]...
 
 Arguments:
-  <TARGET>...  target IP addresses or hostnames to ping
+  [TARGET]...  target IP addresses or hostnames to ping
 
 Options:
+      --config <CONFIG>      Path to a YAML config file (CLI flags override its values)
   -i, --interval <INTERVAL>  Interval in seconds between pings [default: 1]
   -p, --port <PORT>          Prometheus metrics HTTP port [default: 9090]
+  -6, --force_ipv6           Force using IPv6 (config-only field can also enable this)
   -h, --help                 Print help
 ```
+
+### 配置文件
+
+除了命令行参数，你也可以通过 `--config` 从 YAML 文件启动 NBping：
+
+```bash
+nbping --config nbping.yaml
+```
+
+配置文件的字段与命令行参数一一对应，完整示例见 [`nbping.example.yaml`](nbping.example.yaml)：
+
+```yaml
+mode: tui              # tui | exporter（默认 tui）
+targets:
+  - google.com
+  - github.com
+  - apple.com
+  - baidu.com
+  - 1.1.1.1
+count: 0               # 0 = 不限次数
+interval: 1            # 间隔秒数
+force_ipv6: false
+multiple: 0            # 仅 tui 模式
+view_type: graph       # graph | table | point | sparkline（仅 tui 模式）
+# output: results.log  # 仅 tui 模式
+port: 9090             # 仅 exporter 模式
+```
+
+说明：
+
+- **优先级：** 命令行参数 > YAML 配置 > 内置默认值。例如
+  `nbping --config nbping.yaml -i 1` 会强制使用 1 秒间隔，无视配置文件中的值。
+- **模式：** 未使用子命令时，由 `mode` 字段决定走 TUI 还是 exporter 模式；显式执行
+  `nbping exporter ...` 子命令则始终为 exporter 模式。
+- **`force_ipv6`：** `-6` 命令行 flag 只能开启 IPv6；若配置文件已开启而想关闭，请在文件中设置
+  `force_ipv6: false`。
+- 未知字段会被拒绝，因此拼写错误会在启动时直接报错。
 
 ## 致谢
 感谢这些朋友对 NBping 提出的反馈和建议。

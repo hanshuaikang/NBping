@@ -80,11 +80,12 @@ Arguments:
   <TARGET>...  target IP address or hostname to ping
 
 Options:
-  -c, --count <COUNT>          Number of pings to send [default: 65535]
+      --config <CONFIG>        Path to a YAML config file (CLI flags override its values)
+  -c, --count <COUNT>          Number of pings to send [default: 0 = unlimited]
   -i, --interval <INTERVAL>    Interval in seconds between pings [default: 0]
-  -6, --force_ipv6             Force using IPv6
+  -6, --force_ipv6             Force using IPv6 (config-only field can also enable this)
   -m, --multiple <MULTIPLE>    Specify the maximum number of target addresses, Only works on one target address [default: 0]
-  -v, --view-type <VIEW_TYPE>  View mode graph/table/point/sparkline [default: graph]
+  -v, --view-type <VIEW_TYPE>  Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]
   -o, --output <OUTPUT>        Output file to save ping results
   -h, --help                   Print help
   -V, --version                Print version
@@ -99,16 +100,59 @@ nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 ./nbping exporter --help
 Exporter mode for monitoring
 
-Usage: nbping exporter [OPTIONS] <TARGET>...
+Usage: nbping exporter [OPTIONS] [TARGET]...
 
 Arguments:
-  <TARGET>...  target IP addresses or hostnames to ping
+  [TARGET]...  target IP addresses or hostnames to ping
 
 Options:
+      --config <CONFIG>      Path to a YAML config file (CLI flags override its values)
   -i, --interval <INTERVAL>  Interval in seconds between pings [default: 1]
   -p, --port <PORT>          Prometheus metrics HTTP port [default: 9090]
+  -6, --force_ipv6           Force using IPv6 (config-only field can also enable this)
   -h, --help                 Print help
 ```
+
+### Configuration file
+
+Instead of passing everything on the command line, you can start NBping from a
+YAML file with `--config`:
+
+```bash
+nbping --config nbping.yaml
+```
+
+The file mirrors the command-line flags. See [`nbping.example.yaml`](nbping.example.yaml):
+
+```yaml
+mode: tui              # tui | exporter (default: tui)
+targets:
+  - google.com
+  - github.com
+  - apple.com
+  - baidu.com
+  - 1.1.1.1
+count: 0               # 0 = unlimited
+interval: 1            # seconds
+force_ipv6: false
+multiple: 0            # tui mode only
+view_type: graph       # graph | table | point | sparkline (tui mode only)
+# output: results.log  # tui mode only
+port: 9090             # exporter mode only
+```
+
+Notes:
+
+- **Precedence:** command-line flags override the config file, which overrides
+  built-in defaults (`CLI flag > YAML config > default`). For example,
+  `nbping --config nbping.yaml -i 1` forces a 1-second interval regardless of the
+  file.
+- **Mode:** the `mode` field selects TUI or exporter mode when no subcommand is
+  given. Running the explicit `nbping exporter ...` subcommand always uses
+  exporter mode.
+- **`force_ipv6`:** the `-6` flag can only turn IPv6 *on*; to disable IPv6 while a
+  config enables it, set `force_ipv6: false` in the file.
+- Unknown keys are rejected, so typos surface as errors at startup.
 
 
 ## Acknowledgements
