@@ -17,8 +17,8 @@ targets:
   - apple.com
   - x.com
   - baidu.com
-  - 1.1.1.1
-  - 8.8.8.8
+  - qq.com
+  - 163.com
 
 # Number of pings to send. 0 = unlimited. (default: 0)
 count: 0

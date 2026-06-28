@@ -16,7 +16,9 @@ pub fn draw_point_view(
     theme: &Theme,
 ) {
     let ip_height: u16 = 5;
-    let total_height = (ip_data.len() as u16) * ip_height + 2;
+    // Use u32 arithmetic to avoid u16 overflow when ip_data.len() > 13106,
+    // then clamp to u16::MAX before converting.
+    let total_height = ((ip_data.len() as u32) * ip_height as u32 + 2).min(u16::MAX as u32) as u16;
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

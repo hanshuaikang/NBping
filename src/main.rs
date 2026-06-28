@@ -182,6 +182,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Error: at least one target is required (via CLI or config 'targets')");
             std::process::exit(1);
         }
+        // YAML interval is validated in config.rs; guard the CLI path here.
+        if cfg.interval < 0 {
+            eprintln!("Error: interval must be >= 0, got {}", cfg.interval);
+            std::process::exit(1);
+        }
 
         // set Ctrl+C and q and esc to exit
         let running = Arc::new(Mutex::new(true));
@@ -287,7 +292,8 @@ async fn run_app(
 
     let errs = Arc::new(Mutex::new(Vec::new()));
 
-    let interval = if interval == 0 { 500 } else { interval * 1000 };
+    // saturating_mul prevents i32 overflow for very large interval values.
+    let interval = if interval == 0 { 500 } else { interval.saturating_mul(1000) };
     let mut tasks = Vec::new();
 
     for (i, ip) in ips.iter().enumerate() {
@@ -423,7 +429,7 @@ async fn run_exporter_mode(
         ).await
     });
 
-    let interval_ms = interval * 1000;
+    let interval_ms = interval.saturating_mul(1000);
     let ping_threads = spawn_ping_workers(
         target_pairs,
         Duration::from_millis(interval_ms as u64),

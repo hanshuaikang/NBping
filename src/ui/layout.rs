@@ -61,11 +61,10 @@ fn render_header(f: &mut Frame, area: Rect, ctx: &LayoutContext) {
             let alive = if d.received > 0 { a + 1 } else { a };
             (r + d.received, t + d.timeout, s + avg, alive)
         });
-    let global_avg = if total_targets > 0 {
-        sum_avg / total_targets as f64
-    } else {
-        0.0
-    };
+    // Divide by alive (targets with at least one successful ping), not total_targets.
+    // Dead/unreachable targets contribute 0.0 to sum_avg, so including them in the
+    // denominator makes the header average misleadingly low.
+    let global_avg = if alive > 0 { sum_avg / alive as f64 } else { 0.0 };
     let global_loss = calculate_loss_pkg(total_timeout, total_recv);
     let beat = HEARTBEAT[(ctx.tick as usize) % HEARTBEAT.len()];
 

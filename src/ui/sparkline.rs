@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use crate::ip_data::IpData;
 use crate::ui::theme::Theme;
-use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_loss_pkg, calculate_p95, draw_errors_section};
+use crate::ui::utils::{calculate_avg_rtt, calculate_jitter, calculate_loss_pkg, calculate_p95, draw_errors_section, rtt_to_spark_unit};
 
 pub fn draw_sparkline_view(
     f: &mut Frame,
@@ -16,12 +16,15 @@ pub fn draw_sparkline_view(
     theme: &Theme,
 ) {
     let n = ip_data.len().max(1);
+    // 8 rows per cell: 2 for borders + 1 for the info line + 5 for the sparkline.
+    // 5 sparkline rows = 40 sub-levels, enough to make sub-ms bars (▂▃▄▅) visible.
+    const CELL_HEIGHT: u16 = 8;
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
             std::iter::once(Constraint::Length(1))
-                .chain(std::iter::repeat_n(Constraint::Length(5), n))
+                .chain(std::iter::repeat_n(Constraint::Length(CELL_HEIGHT), n))
                 .chain([Constraint::Min(6)])
                 .collect::<Vec<_>>(),
         )
@@ -113,17 +116,31 @@ pub fn draw_sparkline_view(
         let width = spark_rect.width as usize;
         let rtts_len = ip.rtts.len();
         let skip = rtts_len.saturating_sub(width);
-        let spark_data: Vec<u64> = ip
+        // Scale RTT to 1/100 ms units so sub-millisecond RTTs (e.g. LAN/localhost
+        // at 0.3ms) are not truncated to 0 by integer cast. Without this, every
+        // healthy bar with rtt < 1ms maps to 0 and the sparkline looks empty
+        // (indistinguishable from 100% packet loss). Timeouts stay at 0 (blank gap).
+        let raw: Vec<u64> = ip
             .rtts
             .iter()
             .skip(skip)
-            .map(|&rtt| if rtt < 0.0 { 0 } else { rtt as u64 })
+            .map(|&rtt| rtt_to_spark_unit(rtt))
             .collect();
+        // Right-align: pad the front with zeros so the most recent bar is always
+        // at the right edge. The blank leading region is visually distinct from
+        // timeout gaps (timeouts also show as 0/blank) but only appears while the
+        // history is shorter than the widget width — i.e. early in a session.
+        let spark_data: Vec<u64> = if raw.len() < width {
+            let mut padded = vec![0u64; width - raw.len()];
+            padded.extend_from_slice(&raw);
+            padded
+        } else {
+            raw
+        };
 
-        // Cap auto-scale at P95 so a single outlier (e.g. a one-off
-        // 1200ms spike) doesn't pull every typical RTT down to level 0.
-        // Values above the cap clip to a full bar, which highlights spikes.
-        let spark_max = (p95 as u64).max(1);
+        // Cap auto-scale at P95 (same unit) so a single outlier doesn't crush
+        // the typical bars. Values above the cap clip to full bar height.
+        let spark_max = ((p95 * 100.0).round() as u64).max(1);
 
         let spark = Sparkline::default()
             .data(&spark_data)

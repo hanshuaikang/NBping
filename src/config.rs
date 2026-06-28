@@ -1,7 +1,7 @@
 //! YAML configuration file support.
 //!
 //! `nbping` can be started either from command-line flags or from a YAML file
-//! passed via `-c/--config`. The fields here mirror the CLI flags one-to-one
+//! passed via `--config`. The fields here mirror the CLI flags one-to-one
 //! (a flat schema). Every field is optional so that command-line arguments can
 //! selectively override the file: the resolution order is
 //! `CLI explicit flag > YAML config > built-in default`.
@@ -82,6 +82,9 @@ impl FileConfig {
         if let Some(i) = self.interval {
             if i < 0 {
                 return Err(anyhow!("interval must be >= 0, got {}", i));
+            }
+            if i > 86400 {
+                return Err(anyhow!("interval must be <= 86400 (24 h), got {}", i));
             }
         }
         if let Some(m) = self.multiple {
@@ -283,6 +286,17 @@ port: 9100
         assert!(cfg.validate().is_err());
         // serde rejects a negative `count` (usize) before validate() even runs.
         assert!(serde_yaml_ng::from_str::<FileConfig>("count: -1").is_err());
+    }
+
+    #[test]
+    fn rejects_interval_over_86400() {
+        // Values this large would overflow i32 after *1000 and produce an
+        // enormous sleep duration in the ping worker.
+        let cfg: FileConfig = serde_yaml_ng::from_str("interval: 86401").unwrap();
+        assert!(cfg.validate().is_err());
+        // Edge: exactly 86400 is the allowed maximum.
+        let cfg: FileConfig = serde_yaml_ng::from_str("interval: 86400").unwrap();
+        assert!(cfg.validate().is_ok());
     }
 
     fn file(yaml: &str) -> FileConfig {

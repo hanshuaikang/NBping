@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
+const VIEW_COUNT: u8 = 4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum View {
@@ -40,7 +42,7 @@ impl View {
     }
 
     pub fn next(self) -> Self {
-        Self::from_u8((self as u8 + 1) % 4)
+        Self::from_u8((self as u8 + 1) % VIEW_COUNT)
     }
 }
 

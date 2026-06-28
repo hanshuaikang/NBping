@@ -80,11 +80,12 @@ Arguments:
   <TARGET>...  target IP address or hostname to ping
 
 Options:
-  -c, --count <COUNT>          Number of pings to send [default: 65535]
+      --config <CONFIG>        Path to a YAML config file (CLI flags override its values)
+  -c, --count <COUNT>          Number of pings to send [default: 0 = unlimited]
   -i, --interval <INTERVAL>    Interval in seconds between pings [default: 0]
-  -6, --force_ipv6             Force using IPv6
+  -6, --force_ipv6             Force using IPv6 (config-only field can also enable this)
   -m, --multiple <MULTIPLE>    Specify the maximum number of target addresses, Only works on one target address [default: 0]
-  -v, --view-type <VIEW_TYPE>  View mode graph/table/point/sparkline [default: graph]
+  -v, --view-type <VIEW_TYPE>  Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]
   -o, --output <OUTPUT>        Output file to save ping results
   -h, --help                   Print help
   -V, --version                Print version
@@ -99,14 +100,16 @@ nbping exporter www.baidu.com www.google.com -i 1 -p 9100
 ./nbping exporter --help
 Exporter mode for monitoring
 
-Usage: nbping exporter [OPTIONS] <TARGET>...
+Usage: nbping exporter [OPTIONS] [TARGET]...
 
 Arguments:
-  <TARGET>...  target IP addresses or hostnames to ping
+  [TARGET]...  target IP addresses or hostnames to ping
 
 Options:
+      --config <CONFIG>      Path to a YAML config file (CLI flags override its values)
   -i, --interval <INTERVAL>  Interval in seconds between pings [default: 1]
   -p, --port <PORT>          Prometheus metrics HTTP port [default: 9090]
+  -6, --force_ipv6           Force using IPv6 (config-only field can also enable this)
   -h, --help                 Print help
 ```
 

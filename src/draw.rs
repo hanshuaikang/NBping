@@ -90,8 +90,10 @@ pub fn draw_interface_with_updates<B: Backend>(
     output_file: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
     let mut output_file_handle = if let Some(ref output_path) = output_file {
+        // create_new atomically fails if the file already exists, eliminating
+        // the TOCTOU window between the exists() check in main() and the open.
         match std::fs::OpenOptions::new()
-            .create(true)
+            .create_new(true)
             .write(true)
             .open(output_path)
         {
