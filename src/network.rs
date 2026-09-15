@@ -1,12 +1,15 @@
 use std::error::Error;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::io;
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::SyncSender;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 
 use pinger::{ping, PingOptions, PingResult};
 use crate::ping_event::PingEvent;
+
+const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 // get host ip address default to ipv4
 pub(crate) fn resolve_host_ips(host: &str, force_ipv6: bool) -> Result<Vec<IpAddr>, Box<dyn Error>> {
@@ -53,6 +56,19 @@ pub(crate) fn get_multiple_host_ipaddr(host: &str, force_ipv6: bool, multiple: u
         .collect())
 }
 
+pub(crate) fn tcp_ping(ip: &str, port: u16) -> io::Result<Duration> {
+    let ip_addr = ip.parse::<IpAddr>().map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid IP address '{}': {}", ip, err),
+        )
+    })?;
+    let socket_addr = SocketAddr::new(ip_addr, port);
+    let started_at = Instant::now();
+    TcpStream::connect_timeout(&socket_addr, TCP_CONNECT_TIMEOUT)?;
+    Ok(started_at.elapsed())
+}
+
 
 pub struct PingTask {
     addr: String,
@@ -61,6 +77,7 @@ pub struct PingTask {
     interval: u64,
     running: Arc<Mutex<bool>>,
     errs: Arc<Mutex<Vec<String>>>,
+    tcp_port: Option<u16>,
 }
 
 impl PingTask {
@@ -71,6 +88,7 @@ impl PingTask {
         interval: u64,
         running: Arc<Mutex<bool>>,
         errs: Arc<Mutex<Vec<String>>>,
+        tcp_port: Option<u16>,
     ) -> Self {
         Self {
             addr,
@@ -79,11 +97,16 @@ impl PingTask {
             interval,
             running,
             errs,
+            tcp_port,
         }
     }
 
     pub async fn run(&self, ping_event_tx: Arc<SyncSender<PingEvent>>) -> Result<(), Box<dyn Error>>
     {
+        if let Some(port) = self.tcp_port {
+            return self.run_tcp(port, ping_event_tx).await;
+        }
+
         // interval defined 0.5s/every ping
         let interval = Duration::from_millis(self.interval);
         let options = PingOptions::new(
@@ -161,6 +184,58 @@ impl PingTask {
 
         Ok(())
     }
+
+    async fn run_tcp(
+        &self,
+        port: u16,
+        ping_event_tx: Arc<SyncSender<PingEvent>>,
+    ) -> Result<(), Box<dyn Error>> {
+        let interval = Duration::from_millis(self.interval);
+        let mut ping_count = 0;
+
+        loop {
+            if !*self.running.lock().unwrap() {
+                break;
+            }
+
+            if self.count > 0 {
+                if ping_count >= self.count {
+                    break;
+                }
+                ping_count += 1;
+            }
+
+            let probe_started_at = Instant::now();
+            let event = match tcp_ping(&self.ip, port) {
+                Ok(duration) => PingEvent::Success {
+                    addr: self.addr.clone(),
+                    ip: self.ip.clone(),
+                    rtt: (duration.as_secs_f64() * 100_000.0).round() / 100.0,
+                },
+                Err(_) => PingEvent::Timeout {
+                    addr: self.addr.clone(),
+                    ip: self.ip.clone(),
+                },
+            };
+
+            if ping_event_tx.send(event).is_err() {
+                break;
+            }
+
+            if self.count > 0 && ping_count >= self.count {
+                break;
+            }
+
+            let mut remaining = interval.saturating_sub(probe_started_at.elapsed());
+            while remaining > Duration::ZERO && *self.running.lock().unwrap() {
+                let sleep_for = remaining.min(Duration::from_millis(100));
+                tokio::time::sleep(sleep_for).await;
+                remaining = remaining.saturating_sub(sleep_for);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // send ping to the target address
@@ -172,6 +247,7 @@ pub async fn send_ping(
     interval: i32,
     running: Arc<Mutex<bool>>,
     ping_event_tx: Arc<SyncSender<PingEvent>>,
+    tcp_port: Option<u16>,
 ) -> Result<(), Box<dyn Error>>
 {
     // draw ui first
@@ -182,6 +258,7 @@ pub async fn send_ping(
         interval as u64,
         running,
         errs,
+        tcp_port,
     );
     Ok(task.run(ping_event_tx).await?)
 }
@@ -190,4 +267,28 @@ pub async fn send_ping(
 fn set_error(errs: Arc<Mutex<Vec<String>>>, err: String) {
     let mut err_list = errs.lock().unwrap();
     err_list.push(err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, TcpListener};
+
+    #[test]
+    fn tcp_ping_measures_a_successful_connection() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accept_thread = std::thread::spawn(move || listener.accept().unwrap());
+
+        let duration = tcp_ping("127.0.0.1", port).unwrap();
+
+        assert!(duration < TCP_CONNECT_TIMEOUT);
+        accept_thread.join().unwrap();
+    }
+
+    #[test]
+    fn tcp_ping_rejects_an_invalid_ip() {
+        let err = tcp_ping("not-an-ip", 80).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
 }

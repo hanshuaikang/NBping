@@ -1,58 +1,132 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Project-specific instructions for working on NBping with Codex or another coding agent.
 
 ## Project
 
-NBping (formerly Nping) is a Rust CLI ping tool that wraps the system `ping` binary (via the `pinger` crate) and renders results in a Ratatui-based terminal UI, or exports them as Prometheus metrics. Binary name: `nbping`. The crate name in `Cargo.toml` is also `nbping`.
+NBping is a Rust 2021 CLI Ping tool. It wraps the system `ping` command through the
+`pinger` crate and supports two modes:
+
+- TUI mode: concurrent Ping with Ratatui views and optional file output.
+- Exporter mode: concurrent Ping with Prometheus metrics served over HTTP.
+
+The binary and crate name are both `nbping`. The current package version is `0.7.1`.
 
 ## Commands
 
-```bash
-cargo build              # debug build
-cargo build --release    # release build (produces ./target/release/nbping)
-cargo test               # run all tests (CI runs `cargo test --verbose`)
-cargo test <name>        # run a single test by name substring
-cargo run -- <targets>   # run default TUI ping mode
-cargo run -- exporter <targets> -p 9100   # run Prometheus exporter mode
+```text
+cargo build
+cargo build --release
+cargo test
+cargo test <name>
+cargo run -- <targets>
+cargo run -- <targets> --tcp-port 443
+cargo run -- exporter <targets> -i 1 -p 9100
+cargo run -- exporter <targets> --tcp-port 443 -i 1 -p 9100
 ```
 
-CI (`.github/workflows/rust.yml`) runs only `cargo build` + `cargo test` on Ubuntu. Releases are tag-triggered (`v*.*.*`) and cross-compile binaries for Linux/macOS/Windows via `taiki-e/upload-rust-binary-action` — keep the `bin: nbping` name in `release.yml` in sync with `Cargo.toml`.
+CI runs `cargo build` and `cargo test` on Ubuntu. Release builds are produced for
+Linux, macOS, and Windows; keep the binary name `nbping` aligned with `Cargo.toml`
+and `.github/workflows/release.yml`.
 
-## Architecture
+## Repository Navigation
 
-There are **two execution modes**, selected by the presence of the `exporter` subcommand in `main.rs`. Both modes build their own multi-threaded Tokio runtime in `main()` sized to `target_count + 1` worker threads — this is intentional so each ping target gets a dedicated worker without contention.
+This repository contains a `.codegraph/` index. When exploring existing code, use
+`codegraph explore "<question or symbol>"` before broad text searches. Re-read the
+affected files after any change that may have been made by another process.
 
-### Default TUI mode (`run_app` in `main.rs`)
+## Configuration
 
-Data flows through two sync `mpsc` channels (capacity 0, so producers block until consumed — this provides backpressure):
+Configuration is loaded in `src/config.rs` and resolved in this order:
 
+```text
+explicit CLI value > YAML config value > built-in default
 ```
-network::send_ping (per-target tokio task)
-    └── PingEvent ──> data_processor (std::thread)
-                          └── IpData ──> draw::draw_interface_with_updates (tokio task)
-                                              └── ratatui frame
+
+The `exporter` subcommand always selects exporter mode. Without that subcommand,
+the YAML `mode` field selects `tui` or `exporter`, defaulting to `tui`.
+
+Targets fall back from CLI to YAML and are de-duplicated while preserving order.
+The default TUI interval is `0`, which means 500 ms at runtime. Exporter intervals
+must be positive and fall back to one second when configured as zero or negative.
+IPv4 is selected by default; `force_ipv6` selects IPv6 only.
+ICMP is the default probe. `tcp: true` or a configured `tcp_port` selects TCP
+connect probes; an explicit YAML `tcp: false` keeps ICMP enabled. The default TCP
+destination port is 80. The CLI equivalents are `--tcp` and `--tcp-port`, and a
+CLI `--tcp-port` always enables TCP mode.
+
+## TUI Architecture
+
+The default path is orchestrated by `src/main.rs`:
+
+```text
+network::send_ping (one Tokio task per resolved IP)
+    -> PingEvent through a synchronous mpsc channel
+    -> data_processor background thread
+    -> IpData through a synchronous mpsc channel
+    -> draw::draw_interface_with_updates
+    -> Ratatui renderer
 ```
 
-- `network.rs` — `PingTask::run` spawns one task per resolved IP. It reads from the `pinger` crate's blocking `stream.recv()` and emits `PingEvent::Success { rtt }` or `PingEvent::Timeout`. Hard errors are pushed to a shared `errs: Arc<Mutex<Vec<String>>>` instead of crashing.
-- `data_processor.rs` — single background thread that owns a `HashMap<addr_ip, IpData>` and rolls up min/max/last RTT, timeout counter, and a sliding `VecDeque<f64>` of recent RTTs. The deque length is a single shared `RTT_RETENTION = 200` (constant in `data_processor.rs`) because views can now be switched at runtime (`1`–`4` / `Tab`), so retention can't depend on the initial view. Renderers windowing-trim as needed (e.g. `graph.rs` keeps a `GRAPH_WINDOW = 60` slice). Timeouts are encoded as `-1.0` in the RTT buffer; renderers must handle this sentinel.
-- `draw.rs` — owns the ratatui terminal, the keyboard event loop (q/Esc/Ctrl+C set `running = false`), and optional `--output` file writing. It dispatches to one of four view renderers in `src/ui/` based on the `view_type` string.
-- `src/ui/{graph,table,point,sparkline}.rs` — each is an independent renderer; `mod.rs` re-exports the four `draw_*_view` functions. When adding a new view: add a variant to `View` in `view.rs` (and update `from_str`/`from_u8`/`name`/`next`), register it in `ui/mod.rs`, add a match arm in `draw::draw_interface`, and add a `KeyCode::Char('N')` arm in `draw_interface_with_updates`'s event loop.
-- `terminal.rs` — `TerminalGuard` ensures `restore_terminal` (disable raw mode, leave alt screen) runs on drop. The `RawModeGuard` in `main.rs` plays the same role for exporter mode's key listener.
+- `src/network.rs` resolves hosts, consumes the blocking ICMP `pinger` stream,
+  and measures TCP connection establishment when TCP mode is selected.
+- `src/data_processor.rs` owns a `HashMap<addr_ip, IpData>` and updates RTT,
+  min/max, received count, timeout count, and the retained RTT window.
+- Timeout samples are represented as `-1.0`; renderers must filter or display
+  this sentinel intentionally.
+- `RTT_RETENTION` is currently 200. Renderers may use smaller display windows.
+- `src/draw.rs` owns terminal setup, keyboard handling, rendering, and optional
+  output-file writes. `q`, `Esc`, and `Ctrl+C` stop TUI mode.
+- `src/ui/graph.rs`, `table.rs`, `point.rs`, and `sparkline.rs` are independent
+  renderers. View state is defined in `src/view.rs` and switched with `1`-`4` or
+  `Tab`; theme state is managed by `src/ui/theme.rs` and switched with `t`.
+- `src/terminal.rs` and the guards in `src/main.rs` must continue to restore the
+  terminal on normal and error exits.
 
-The `running: Arc<Mutex<bool>>` flag is the universal shutdown signal across all default-mode threads/tasks.
+When adding a view, update the `View` enum and its conversion/name/rotation
+methods, register the renderer in `src/ui/mod.rs`, add its dispatch arm in
+`src/draw.rs`, and add its keyboard binding to the event loop.
 
-### Exporter mode (`run_exporter_mode` in `main.rs`, `src/exporter/`)
+## Exporter Architecture
 
-Different concurrency model — uses `std::thread` (not tokio tasks) for ping workers because the metrics path doesn't need async, and `AtomicBool` (not `Mutex<bool>`) for the running flag.
+Exporter mode is implemented by `src/main.rs` and `src/exporter/`:
 
-- `exporter/runner.rs::spawn_ping_workers` — one OS thread per target, each running `run_ping_loop` that updates `PrometheusMetrics` directly (no channels).
-- `exporter/metric.rs` — defines the Prometheus collectors and contains the `http_server` submodule (hyper 1.x + hyper-util) that serves `/metrics`. Shutdown is signaled via a `tokio::sync::oneshot` channel from either the Ctrl+C handler or the q/Esc key listener.
+- `exporter/runner.rs` starts one OS thread per target and updates metrics directly
+  for either ICMP results or TCP connection attempts.
+- `exporter/metric.rs` owns the Prometheus registry and the Hyper HTTP server.
+- `GET /metrics` returns Prometheus text; `GET /` returns a small status page;
+  other routes return 404.
+- Shutdown is coordinated through the shared atomic running flag and a Tokio
+  oneshot signal. `Ctrl+C`, `q`, and `Esc` must allow the HTTP server and workers
+  to exit cleanly.
 
-When changing metric names or labels in `metric.rs`, remember they're a public scrape contract — existing Grafana dashboards and Prometheus queries depend on them.
+Metric names and labels are a public scrape contract. Preserve these unless the
+change explicitly includes its downstream impact:
 
-### Cross-cutting
+- `nbping_ping_duration_seconds{target,ip}`
+- `nbping_ping_requests_total{target,ip,status}` where status is `success`,
+  `timeout`, or `error`
 
-- `ip_data.rs` — the `IpData` struct is the shared data shape between the processor and all UI renderers. Adding a field requires updating both the initial construction in `main.rs` / `data_processor.rs` and any renderer that reads it.
-- `network::resolve_host_ips` is used by both modes. The `--multiple` / `-m` flag (default mode only) returns multiple A/AAAA records for a single host so you can ping all of them in parallel — this is why default mode's IP count can exceed target count.
-- `force_ipv6` filters resolved addresses to V6 only; default behavior filters to V4 only (there's no dual-stack mode).
+## Change Discipline
+
+- Keep changes scoped to the affected module and follow the existing Rust style.
+- Preserve existing comments and behavior outside the requested change.
+- Reuse the current channel, state, configuration, and rendering patterns before
+  introducing new abstractions.
+- Account for both TUI and exporter callers when changing `network` or config code.
+- When changing `IpData`, update initialization, data processing, and every renderer.
+- Validate user-facing behavior at startup where practical, especially config enum
+  values and numeric ranges.
+
+## Verification
+
+Run the narrowest relevant checks after changes. For normal code changes, run:
+
+```text
+cargo test
+```
+
+For CLI, config, HTTP, or rendering changes, also run a focused manual command or
+targeted test when the environment supports it. Report any checks that could not
+be run and distinguish build/test verification from live network or terminal
+behavior.

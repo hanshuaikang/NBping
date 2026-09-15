@@ -67,6 +67,14 @@ struct Args {
     #[clap(long = "force_ipv6", default_value_t = false, short = '6', global = true, help = "Force using IPv6 (config-only field can also enable this)")]
     pub force_ipv6: bool,
 
+    /// Use TCP connect probes instead of ICMP ping
+    #[arg(long, global = true, help = "Use TCP connect probes instead of ICMP ping")]
+    tcp: bool,
+
+    /// TCP destination port; specifying it also enables TCP mode
+    #[arg(long, global = true, value_name = "PORT", help = "TCP destination port [default: 80]")]
+    tcp_port: Option<u16>,
+
     #[arg(
         short = 'm',
         long,
@@ -148,10 +156,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.target,
             args.interval,
             args.force_ipv6,
+            args.tcp,
+            args.tcp_port,
             &file_cfg,
         );
         if cfg.targets.is_empty() {
             eprintln!("Error: at least one target is required (via CLI or config 'targets')");
+            std::process::exit(1);
+        }
+        if cfg.tcp_port == 0 {
+            eprintln!("Error: tcp-port must be between 1 and 65535");
             std::process::exit(1);
         }
 
@@ -161,7 +175,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enable_all()
             .build()?;
 
-        let res = rt.block_on(run_exporter_mode(cfg.targets, cfg.interval, cfg.port, cfg.force_ipv6));
+        let res = rt.block_on(run_exporter_mode(
+            cfg.targets,
+            cfg.interval,
+            cfg.port,
+            cfg.force_ipv6,
+            cfg.tcp.then_some(cfg.tcp_port),
+        ));
         if let Err(err) = res {
             eprintln!("{}", err);
             std::process::exit(1);
@@ -173,6 +193,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.count,
             args.interval,
             args.force_ipv6,
+            args.tcp,
+            args.tcp_port,
             args.multiple,
             args.view_type,
             args.output,
@@ -185,6 +207,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // YAML interval is validated in config.rs; guard the CLI path here.
         if cfg.interval < 0 {
             eprintln!("Error: interval must be >= 0, got {}", cfg.interval);
+            std::process::exit(1);
+        }
+        if cfg.tcp_port == 0 {
+            eprintln!("Error: tcp-port must be between 1 and 65535");
             std::process::exit(1);
         }
 
@@ -213,7 +239,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enable_all()
             .build()?;
 
-        let res = rt.block_on(run_app(cfg.targets, cfg.count, cfg.interval, running.clone(), cfg.force_ipv6, cfg.multiple, cfg.view_type, cfg.output));
+        let res = rt.block_on(run_app(
+            cfg.targets,
+            cfg.count,
+            cfg.interval,
+            running.clone(),
+            cfg.force_ipv6,
+            cfg.tcp.then_some(cfg.tcp_port),
+            cfg.multiple,
+            cfg.view_type,
+            cfg.output,
+        ));
         if let Err(err) = res {
             eprintln!("{}", err);
             std::process::exit(1);
@@ -228,6 +264,7 @@ async fn run_app(
     interval: i32,
     running: Arc<Mutex<bool>>,
     force_ipv6: bool,
+    tcp_port: Option<u16>,
     multiple: i32,
     view_type: String,
     output_file: Option<String>,
@@ -309,7 +346,16 @@ async fn run_app(
             data[i].ip = ip.clone();
             let addr = data[i].addr.clone();
             async move {
-                send_ping(addr, ip, errs.clone(), count, interval, running.clone(), ping_event_tx).await.unwrap();
+                send_ping(
+                    addr,
+                    ip,
+                    errs.clone(),
+                    count,
+                    interval,
+                    running.clone(),
+                    ping_event_tx,
+                    tcp_port,
+                ).await.unwrap();
             }
         });
         tasks.push(task)
@@ -359,6 +405,7 @@ async fn run_exporter_mode(
     interval: i32,
     port: u16,
     force_ipv6: bool,
+    tcp_port: Option<u16>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 创建 Prometheus metrics 收集器
     let prometheus_metrics = Arc::new(PrometheusMetrics::new()?);
@@ -413,6 +460,10 @@ async fn run_exporter_mode(
         }
     }
     println!("│ Interval    : {} seconds", interval);
+    match tcp_port {
+        Some(tcp_port) => println!("│ Probe       : TCP port {}", tcp_port),
+        None => println!("│ Probe       : ICMP"),
+    }
     println!("│ Metrics port: {}", port);
     println!("│ Metrics     : http://0.0.0.0:{}/metrics", port);
     println!("│ Actions     : Press Ctrl+C or q to stop");
@@ -435,6 +486,7 @@ async fn run_exporter_mode(
         Duration::from_millis(interval_ms as u64),
         running.clone(),
         prometheus_metrics.clone(),
+        tcp_port,
     );
 
     // Listen for q/esc to exit (exporter mode only)

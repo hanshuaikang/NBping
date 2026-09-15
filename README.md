@@ -58,17 +58,25 @@ brew install nbping
 nbping --help
 ```
 
-## Feature:
-- TCP Ping support
-- IP range Ping support
+## Features:
+- ICMP Ping and TCP Ping
+- Concurrent probes for multiple targets
+- Real-time TUI charts and Prometheus exporter
 
 ## Roadmap:
+- IP range Ping support
 - Optimize UI interface, add more dynamic effects.
 
 ## Usage
 
 ```bash
 nbping www.baidu.com www.google.com www.apple.com www.sina.com -c 20 -i 2
+
+# TCP Ping measures the TCP handshake latency to port 443
+nbping www.baidu.com --tcp --tcp-port 443
+
+# Providing --tcp-port also enables TCP Ping
+nbping www.baidu.com --tcp-port 443
 
 nbping --help
 
@@ -84,6 +92,8 @@ Options:
   -c, --count <COUNT>          Number of pings to send [default: 0 = unlimited]
   -i, --interval <INTERVAL>    Interval in seconds between pings [default: 0]
   -6, --force_ipv6             Force using IPv6 (config-only field can also enable this)
+      --tcp                    Use TCP connect probes instead of ICMP ping
+      --tcp-port <PORT>        TCP destination port [default: 80]
   -m, --multiple <MULTIPLE>    Specify the maximum number of target addresses, Only works on one target address [default: 0]
   -v, --view-type <VIEW_TYPE>  Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]
   -o, --output <OUTPUT>        Output file to save ping results
@@ -96,6 +106,9 @@ Options:
 
 ```bash
 nbping exporter www.baidu.com www.google.com -i 1 -p 9100
+
+# TCP Ping: -p is the Prometheus HTTP port; --tcp-port is the target service port
+nbping exporter www.baidu.com --tcp-port 443 -i 1 -p 9100
 
 ./nbping exporter --help
 Exporter mode for monitoring
@@ -110,6 +123,8 @@ Options:
   -i, --interval <INTERVAL>  Interval in seconds between pings [default: 1]
   -p, --port <PORT>          Prometheus metrics HTTP port [default: 9090]
   -6, --force_ipv6           Force using IPv6 (config-only field can also enable this)
+      --tcp                  Use TCP connect probes instead of ICMP ping
+      --tcp-port <PORT>      TCP destination port [default: 80]
   -h, --help                 Print help
 ```
 
@@ -135,6 +150,8 @@ targets:
 count: 0               # 0 = unlimited
 interval: 1            # seconds
 force_ipv6: false
+tcp: true              # use TCP Ping; false keeps the default ICMP mode
+tcp_port: 443          # target port; enables TCP unless tcp is explicitly false
 multiple: 0            # tui mode only
 view_type: graph       # graph | table | point | sparkline (tui mode only)
 # output: results.log  # tui mode only
@@ -152,6 +169,11 @@ Notes:
   exporter mode.
 - **`force_ipv6`:** the `-6` flag can only turn IPv6 *on*; to disable IPv6 while a
   config enables it, set `force_ipv6: false` in the file.
+- **TCP Ping:** TCP mode measures connection establishment latency. Timeouts,
+  connection refusals, and other connection failures count as timeouts.
+  `--tcp-port` selects the target service port, while exporter `-p/--port`
+  selects the Prometheus HTTP listening port.
+  In YAML, an explicit `tcp: false` keeps ICMP enabled while retaining `tcp_port`.
 - Unknown keys are rejected, so typos surface as errors at startup.
 
 

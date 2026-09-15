@@ -32,6 +32,12 @@ interval: 1
 # while a config enables it, set this to false here. (default: false)
 force_ipv6: false
 
+# Use TCP connect probes instead of ICMP ping. (default: false)
+tcp: false
+
+# TCP destination port. Setting this field also enables TCP mode. (default: 80)
+# tcp_port: 80
+
 # tui mode only: with a single target, resolve up to this many A/AAAA records
 # and ping them all in parallel. (default: 0 = disabled)
 multiple: 0
