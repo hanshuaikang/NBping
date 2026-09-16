@@ -58,11 +58,14 @@ brew install nbping
 nbping --help
 ```
 
-## Feature:
-- TCP Ping support
-- IP range Ping support
+## Features:
+- ICMP Ping and TCP Ping
+- Concurrent probes for multiple targets
+- Real-time TUI charts and Prometheus exporter
+- Local SQLite history with time-range queries
 
 ## Roadmap:
+- IP range Ping support
 - Optimize UI interface, add more dynamic effects.
 
 ## Usage
@@ -70,32 +73,73 @@ nbping --help
 ```bash
 nbping www.baidu.com www.google.com www.apple.com www.sina.com -c 20 -i 2
 
+# TCP Ping measures the TCP handshake latency to port 443
+nbping www.baidu.com --tcp --tcp-port 443
+
+# Providing --tcp-port also enables TCP Ping
+nbping www.baidu.com --tcp-port 443
+
 nbping --help
 
 🏎  NBping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations
 
-Usage: nbping [OPTIONS] <TARGET>...
+Usage: nbping [OPTIONS] [TARGET]... [COMMAND]
+
+Commands:
+  exporter  Exporter mode for monitoring
+  history   Query probe history stored in a local SQLite database
+  help      Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <TARGET>...  target IP address or hostname to ping
+  [TARGET]...  target IP address or hostname to ping
 
 Options:
       --config <CONFIG>        Path to a YAML config file (CLI flags override its values)
   -c, --count <COUNT>          Number of pings to send [default: 0 = unlimited]
   -i, --interval <INTERVAL>    Interval in seconds between pings [default: 0]
   -6, --force_ipv6             Force using IPv6 (config-only field can also enable this)
+      --tcp                    Use TCP connect probes instead of ICMP ping
+      --tcp-port <PORT>        TCP destination port [default: 80]
   -m, --multiple <MULTIPLE>    Specify the maximum number of target addresses, Only works on one target address [default: 0]
   -v, --view-type <VIEW_TYPE>  Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]
   -o, --output <OUTPUT>        Output file to save ping results
+      --history-db <PATH>      SQLite database to append queryable probe history
   -h, --help                   Print help
   -V, --version                Print version
 
 ```
 
+### Local History
+
+Store ICMP or TCP probe samples in a local SQLite database without running
+Prometheus:
+
+```bash
+nbping ws.example.com --tcp-port 443 -i 1 --history-db nbping.db
+```
+
+Query an inclusive time range, optionally filtering by target:
+
+```bash
+nbping history --db nbping.db \
+  --from "2026-09-15T14:00:00+08:00" \
+  --to "2026-09-15T15:00:00+08:00" \
+  --target ws.example.com
+```
+
+RFC3339 timestamps are recommended. Local `YYYY-MM-DD HH:MM[:SS]` values are
+also accepted. Results are ordered by sample time and include availability,
+success/timeout counts, RTT statistics, and individual samples. The database is
+appended across runs. These records describe ICMP or TCP connectivity, not the
+WebSocket protocol, authentication, or application messages.
+
 ### Exporter Usage
 
 ```bash
 nbping exporter www.baidu.com www.google.com -i 1 -p 9100
+
+# TCP Ping: -p is the Prometheus HTTP port; --tcp-port is the target service port
+nbping exporter www.baidu.com --tcp-port 443 -i 1 -p 9100
 
 ./nbping exporter --help
 Exporter mode for monitoring
@@ -110,6 +154,8 @@ Options:
   -i, --interval <INTERVAL>  Interval in seconds between pings [default: 1]
   -p, --port <PORT>          Prometheus metrics HTTP port [default: 9090]
   -6, --force_ipv6           Force using IPv6 (config-only field can also enable this)
+      --tcp                  Use TCP connect probes instead of ICMP ping
+      --tcp-port <PORT>      TCP destination port [default: 80]
   -h, --help                 Print help
 ```
 
@@ -135,9 +181,12 @@ targets:
 count: 0               # 0 = unlimited
 interval: 1            # seconds
 force_ipv6: false
+tcp: true              # use TCP Ping; false keeps the default ICMP mode
+tcp_port: 443          # target port; enables TCP unless tcp is explicitly false
 multiple: 0            # tui mode only
 view_type: graph       # graph | table | point | sparkline (tui mode only)
 # output: results.log  # tui mode only
+# history_db: nbping.db # tui mode only; appends queryable SQLite history
 port: 9090             # exporter mode only
 ```
 
@@ -152,6 +201,13 @@ Notes:
   exporter mode.
 - **`force_ipv6`:** the `-6` flag can only turn IPv6 *on*; to disable IPv6 while a
   config enables it, set `force_ipv6: false` in the file.
+- **TCP Ping:** TCP mode measures connection establishment latency. Timeouts,
+  connection refusals, and other connection failures count as timeouts.
+  `--tcp-port` selects the target service port, while exporter `-p/--port`
+  selects the Prometheus HTTP listening port.
+  In YAML, an explicit `tcp: false` keeps ICMP enabled while retaining `tcp_port`.
+- **History:** `--history-db` or `history_db` appends samples to SQLite. The
+  existing `--output` option remains a new-file-only plain text export.
 - Unknown keys are rejected, so typos surface as errors at startup.
 
 

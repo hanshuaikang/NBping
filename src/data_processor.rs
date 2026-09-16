@@ -1,5 +1,7 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::mpsc;
+use std::thread::JoinHandle;
+use crate::history::ProbeRecord;
 use crate::ping_event::PingEvent;
 use crate::ip_data::IpData;
 
@@ -91,14 +93,19 @@ pub fn start_data_processor(
     ping_event_rx: mpsc::Receiver<PingEvent>,
     ui_data_tx: mpsc::SyncSender<IpData>,
     targets: Vec<(String, String)>,
-    running: Arc<Mutex<bool>>,
-) {
+    mut history_tx: Option<mpsc::SyncSender<ProbeRecord>>,
+) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut processor = DataProcessor::new(&targets);
         
-        while *running.lock().unwrap() {
+        loop {
             match ping_event_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(event) => {
+                    if let Some(tx) = history_tx.as_ref() {
+                        if tx.send(ProbeRecord::from_event(&event)).is_err() {
+                            history_tx = None;
+                        }
+                    }
                     if let Some(updated_data) = processor.process_event(event) {
                         if ui_data_tx.send(updated_data).is_err() {
                             // UI channel closed, exit
@@ -108,6 +115,7 @@ pub fn start_data_processor(
                 },
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     // Continue checking running flag
+                    // Channel disconnection now controls shutdown so queued history can drain.
                     continue;
                 },
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -116,5 +124,50 @@ pub fn start_data_processor(
                 }
             }
         }
-    });
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn success(sampled_at_ms: i64) -> PingEvent {
+        PingEvent::Success {
+            addr: "example.com".to_string(),
+            ip: "127.0.0.1".to_string(),
+            rtt: 12.5,
+            sampled_at_ms,
+            tcp_port: Some(443),
+        }
+    }
+
+    #[test]
+    fn drains_history_before_network_channel_disconnects() {
+        let (ping_tx, ping_rx) = mpsc::sync_channel(0);
+        let (ui_tx, ui_rx) = mpsc::sync_channel(0);
+        let (history_tx, history_rx) = mpsc::sync_channel(4);
+
+        let handle = start_data_processor(
+            ping_rx,
+            ui_tx,
+            vec![("example.com".to_string(), "127.0.0.1".to_string())],
+            Some(history_tx),
+        );
+
+        let ui_handle = std::thread::spawn(move || {
+            assert!(ui_rx.recv().is_ok());
+            assert!(ui_rx.recv().is_ok());
+        });
+
+        ping_tx.send(success(1)).unwrap();
+        ping_tx.send(success(2)).unwrap();
+        drop(ping_tx);
+        handle.join().unwrap();
+        ui_handle.join().unwrap();
+
+        let records = history_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].sampled_at_ms, 1);
+        assert_eq!(records[1].sampled_at_ms, 2);
+    }
 }

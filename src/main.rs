@@ -8,6 +8,7 @@ mod data_processor;
 mod exporter;
 mod view;
 mod config;
+mod history;
 
 use clap::{Parser, Subcommand};
 use std::collections::VecDeque;
@@ -25,6 +26,7 @@ use crate::network::send_ping;
 use crate::exporter::{PrometheusMetrics, http_server, spawn_ping_workers};
 use crate::view::View;
 use crate::config::{FileConfig, Mode};
+use crate::history::HistoryWriter;
 
 struct RawModeGuard;
 
@@ -67,6 +69,14 @@ struct Args {
     #[clap(long = "force_ipv6", default_value_t = false, short = '6', global = true, help = "Force using IPv6 (config-only field can also enable this)")]
     pub force_ipv6: bool,
 
+    /// Use TCP connect probes instead of ICMP ping
+    #[arg(long, global = true, help = "Use TCP connect probes instead of ICMP ping")]
+    tcp: bool,
+
+    /// TCP destination port; specifying it also enables TCP mode
+    #[arg(long, global = true, value_name = "PORT", help = "TCP destination port [default: 80]")]
+    tcp_port: Option<u16>,
+
     #[arg(
         short = 'm',
         long,
@@ -79,6 +89,9 @@ struct Args {
 
     #[arg(short = 'o', long = "output", help = "Output file to save ping results")]
     output: Option<String>,
+
+    #[arg(long = "history-db", value_name = "PATH", help = "SQLite database to append queryable probe history")]
+    history_db: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -100,12 +113,36 @@ enum Commands {
         #[arg(short, long, help = "Prometheus metrics HTTP port [default: 9090]")]
         port: Option<u16>,
     },
+
+    /// Query probe history stored in a local SQLite database
+    History {
+        /// SQLite history database path
+        #[arg(long, value_name = "PATH")]
+        db: String,
+
+        /// Inclusive range start (RFC3339 or local YYYY-MM-DD HH:MM[:SS])
+        #[arg(long)]
+        from: String,
+
+        /// Inclusive range end (RFC3339 or local YYYY-MM-DD HH:MM[:SS])
+        #[arg(long)]
+        to: String,
+
+        /// Only show records for this target
+        #[arg(long)]
+        target: Option<String>,
+    },
 }
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // parse command line arguments
     let args = Args::parse();
+
+    if let Some(Commands::History { db, from, to, target }) = &args.command {
+        history::print_history(db, from, to, target.as_deref())?;
+        return Ok(());
+    }
 
     // Load the YAML config file when one was provided. Values from it act as a
     // baseline that command-line flags override (CLI > YAML > built-in default).
@@ -125,6 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //  - otherwise the config file's `mode` field decides (defaulting to tui)
     let run_exporter = match &args.command {
         Some(Commands::Exporter { .. }) => true,
+        Some(Commands::History { .. }) => unreachable!(),
         None => match file_cfg.mode() {
             Ok(mode) => mode == Mode::Exporter,
             Err(err) => {
@@ -139,6 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // own target/interval/port) or top-level flags alongside `--config mode: exporter`.
         let (sub_target, sub_interval, sub_port) = match args.command {
             Some(Commands::Exporter { target, interval, port }) => (target, interval, port),
+            Some(Commands::History { .. }) => unreachable!(),
             None => (Vec::new(), None, None),
         };
         let cfg = config::resolve_exporter(
@@ -148,10 +187,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.target,
             args.interval,
             args.force_ipv6,
+            args.tcp,
+            args.tcp_port,
             &file_cfg,
         );
         if cfg.targets.is_empty() {
             eprintln!("Error: at least one target is required (via CLI or config 'targets')");
+            std::process::exit(1);
+        }
+        if cfg.tcp_port == 0 {
+            eprintln!("Error: tcp-port must be between 1 and 65535");
             std::process::exit(1);
         }
 
@@ -161,7 +206,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enable_all()
             .build()?;
 
-        let res = rt.block_on(run_exporter_mode(cfg.targets, cfg.interval, cfg.port, cfg.force_ipv6));
+        let res = rt.block_on(run_exporter_mode(
+            cfg.targets,
+            cfg.interval,
+            cfg.port,
+            cfg.force_ipv6,
+            cfg.tcp.then_some(cfg.tcp_port),
+        ));
         if let Err(err) = res {
             eprintln!("{}", err);
             std::process::exit(1);
@@ -173,9 +224,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.count,
             args.interval,
             args.force_ipv6,
+            args.tcp,
+            args.tcp_port,
             args.multiple,
             args.view_type,
             args.output,
+            args.history_db,
             &file_cfg,
         );
         if cfg.targets.is_empty() {
@@ -185,6 +239,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // YAML interval is validated in config.rs; guard the CLI path here.
         if cfg.interval < 0 {
             eprintln!("Error: interval must be >= 0, got {}", cfg.interval);
+            std::process::exit(1);
+        }
+        if cfg.tcp_port == 0 {
+            eprintln!("Error: tcp-port must be between 1 and 65535");
             std::process::exit(1);
         }
 
@@ -213,7 +271,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enable_all()
             .build()?;
 
-        let res = rt.block_on(run_app(cfg.targets, cfg.count, cfg.interval, running.clone(), cfg.force_ipv6, cfg.multiple, cfg.view_type, cfg.output));
+        let res = rt.block_on(run_app(
+            cfg.targets,
+            cfg.count,
+            cfg.interval,
+            running.clone(),
+            cfg.force_ipv6,
+            cfg.tcp.then_some(cfg.tcp_port),
+            cfg.multiple,
+            cfg.view_type,
+            cfg.output,
+            cfg.history_db,
+        ));
         if let Err(err) = res {
             eprintln!("{}", err);
             std::process::exit(1);
@@ -228,10 +297,15 @@ async fn run_app(
     interval: i32,
     running: Arc<Mutex<bool>>,
     force_ipv6: bool,
+    tcp_port: Option<u16>,
     multiple: i32,
     view_type: String,
     output_file: Option<String>,
+    history_db: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+    let history_writer = history_db.map(HistoryWriter::start).transpose()?;
+    let history_tx = history_writer.as_ref().map(HistoryWriter::sender);
 
     // init terminal
     let terminal = draw::init_terminal()?;
@@ -279,11 +353,11 @@ async fn run_app(
         (addr, ip.clone())
     }).collect();
 
-    start_data_processor(
+    let data_processor_handle = start_data_processor(
         ping_event_rx,
         ui_data_tx,
         targets_for_processor,
-        running.clone(),
+        history_tx,
     );
 
     let initial_view = View::from_str(&view_type).unwrap_or(View::Graph);
@@ -309,7 +383,16 @@ async fn run_app(
             data[i].ip = ip.clone();
             let addr = data[i].addr.clone();
             async move {
-                send_ping(addr, ip, errs.clone(), count, interval, running.clone(), ping_event_tx).await.unwrap();
+                send_ping(
+                    addr,
+                    ip,
+                    errs.clone(),
+                    count,
+                    interval,
+                    running.clone(),
+                    ping_event_tx,
+                    tcp_port,
+                ).await.unwrap();
             }
         });
         tasks.push(task)
@@ -338,20 +421,87 @@ async fn run_app(
     });
 
     // Wait for all ping tasks to complete
+    let mut ping_task_error = None;
     for task in tasks {
-        task.await?;
+        if let Err(error) = task.await {
+            if ping_task_error.is_none() {
+                ping_task_error = Some(error);
+            }
+        }
     }
+
+    drop(ping_event_tx);
+
+    let data_processor_result = data_processor_handle.join();
+    let history_result = history_writer.map(HistoryWriter::finish).transpose();
     
     // All ping tasks completed, signal UI to exit
     *running.lock().unwrap() = false;
     
     // Wait for UI task to finish
-    ui_task.await?;
+    let ui_result = ui_task.await;
     
     // restore terminal
     draw::restore_terminal(&mut terminal_guard.lock().unwrap().terminal.as_mut().unwrap())?;
 
+    if let Some(error) = ping_task_error {
+        return Err(error.into());
+    }
+    if data_processor_result.is_err() {
+        return Err("data processor thread panicked".into());
+    }
+    history_result?;
+    ui_result?;
+
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn parses_tui_history_database_without_changing_existing_flags() {
+        let args = Args::try_parse_from([
+            "nbping",
+            "example.com",
+            "--tcp-port",
+            "443",
+            "--history-db",
+            "nbping.db",
+        ])
+        .unwrap();
+        assert_eq!(args.target, vec!["example.com"]);
+        assert_eq!(args.tcp_port, Some(443));
+        assert_eq!(args.history_db.as_deref(), Some("nbping.db"));
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn parses_history_time_range_subcommand() {
+        let args = Args::try_parse_from([
+            "nbping",
+            "history",
+            "--db",
+            "nbping.db",
+            "--from",
+            "2026-09-15T14:00:00+08:00",
+            "--to",
+            "2026-09-15T15:00:00+08:00",
+            "--target",
+            "example.com",
+        ])
+        .unwrap();
+        match args.command {
+            Some(Commands::History { db, from, to, target }) => {
+                assert_eq!(db, "nbping.db");
+                assert_eq!(from, "2026-09-15T14:00:00+08:00");
+                assert_eq!(to, "2026-09-15T15:00:00+08:00");
+                assert_eq!(target.as_deref(), Some("example.com"));
+            }
+            _ => panic!("expected history subcommand"),
+        }
+    }
 }
 
 async fn run_exporter_mode(
@@ -359,6 +509,7 @@ async fn run_exporter_mode(
     interval: i32,
     port: u16,
     force_ipv6: bool,
+    tcp_port: Option<u16>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 创建 Prometheus metrics 收集器
     let prometheus_metrics = Arc::new(PrometheusMetrics::new()?);
@@ -413,6 +564,10 @@ async fn run_exporter_mode(
         }
     }
     println!("│ Interval    : {} seconds", interval);
+    match tcp_port {
+        Some(tcp_port) => println!("│ Probe       : TCP port {}", tcp_port),
+        None => println!("│ Probe       : ICMP"),
+    }
     println!("│ Metrics port: {}", port);
     println!("│ Metrics     : http://0.0.0.0:{}/metrics", port);
     println!("│ Actions     : Press Ctrl+C or q to stop");
@@ -435,6 +590,7 @@ async fn run_exporter_mode(
         Duration::from_millis(interval_ms as u64),
         running.clone(),
         prometheus_metrics.clone(),
+        tcp_port,
     );
 
     // Listen for q/esc to exit (exporter mode only)
