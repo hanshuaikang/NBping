@@ -49,5 +49,8 @@ view_type: graph
 # tui mode only: file to save ping results to. Must not already exist.
 # output: results.log
 
+# tui mode only: SQLite database to append queryable probe history.
+# history_db: nbping.db
+
 # exporter mode only: Prometheus metrics HTTP port. (default: 9090)
 port: 9090

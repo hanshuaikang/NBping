@@ -59,6 +59,7 @@ nbping --help
 - ICMP Ping 与 TCP Ping
 - 多地址并发探测
 - TUI 实时图表与 Prometheus Exporter
+- 本地 SQLite 历史记录与时间段查询
 
 ## 后续的计划:
 - IP 段 Ping 支持
@@ -79,10 +80,15 @@ nbping --help
 
 🏎  NBping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations
 
-Usage: nbping [OPTIONS] <TARGET>...
+Usage: nbping [OPTIONS] [TARGET]... [COMMAND]
+
+Commands:
+  exporter  Exporter mode for monitoring
+  history   Query probe history stored in a local SQLite database
+  help      Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <TARGET>...  target IP address or hostname to ping
+  [TARGET]...  target IP address or hostname to ping
 
 Options:
       --config <CONFIG>        Path to a YAML config file (CLI flags override its values)
@@ -94,9 +100,31 @@ Options:
   -m, --multiple <MULTIPLE>    Specify the maximum number of target addresses, Only works on one target address [default: 0]
   -v, --view-type <VIEW_TYPE>  Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]
   -o, --output <OUTPUT>        Output file to save ping results
+      --history-db <PATH>      SQLite database to append queryable probe history
   -h, --help                   Print help
   -V, --version                Print version
 ```
+
+### 本地历史记录
+
+不运行 Prometheus，直接将 ICMP 或 TCP 探测样本保存到本地 SQLite：
+
+```bash
+nbping ws.example.com --tcp-port 443 -i 1 --history-db nbping.db
+```
+
+按闭区间查询，并可按目标过滤：
+
+```bash
+nbping history --db nbping.db \
+  --from "2026-09-15T14:00:00+08:00" \
+  --to "2026-09-15T15:00:00+08:00" \
+  --target ws.example.com
+```
+
+推荐使用 RFC3339 时间，也支持本地时间 `YYYY-MM-DD HH:MM[:SS]`。结果按采样时间排序，
+包含可用率、成功/超时次数、RTT 统计和逐条记录；数据库会跨多次运行持续追加。
+这些记录表示 ICMP 或 TCP 连通性，不表示 WebSocket 协议、鉴权或业务消息状态。
 
 
 ### Exporter Usage
@@ -151,6 +179,7 @@ tcp_port: 443          # TCP 目标端口；未显式设置 tcp: false 时会自
 multiple: 0            # 仅 tui 模式
 view_type: graph       # graph | table | point | sparkline（仅 tui 模式）
 # output: results.log  # 仅 tui 模式
+# history_db: nbping.db # 仅 tui 模式；追加可按时间查询的 SQLite 历史
 port: 9090             # 仅 exporter 模式
 ```
 
@@ -165,6 +194,8 @@ port: 9090             # 仅 exporter 模式
 - **TCP Ping：** TCP 模式统计建立连接所需时间；连接超时、端口拒绝或其他连接失败会计为 timeout。
   `--tcp-port` 是被探测服务端口，Exporter 的 `-p/--port` 是 Prometheus HTTP 监听端口。
   YAML 中显式设置 `tcp: false` 可在保留 `tcp_port` 时继续使用 ICMP。
+- **历史记录：** `--history-db` 或 `history_db` 会向 SQLite 追加采样；原有 `--output`
+  仍保持只创建新文件的纯文本输出行为。
 - 未知字段会被拒绝，因此拼写错误会在启动时直接报错。
 
 ## 致谢

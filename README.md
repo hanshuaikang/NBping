@@ -62,6 +62,7 @@ nbping --help
 - ICMP Ping and TCP Ping
 - Concurrent probes for multiple targets
 - Real-time TUI charts and Prometheus exporter
+- Local SQLite history with time-range queries
 
 ## Roadmap:
 - IP range Ping support
@@ -82,10 +83,15 @@ nbping --help
 
 🏎  NBping mean NB Ping, A Ping Tool in Rust with Real-Time Data and Visualizations
 
-Usage: nbping [OPTIONS] <TARGET>...
+Usage: nbping [OPTIONS] [TARGET]... [COMMAND]
+
+Commands:
+  exporter  Exporter mode for monitoring
+  history   Query probe history stored in a local SQLite database
+  help      Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <TARGET>...  target IP address or hostname to ping
+  [TARGET]...  target IP address or hostname to ping
 
 Options:
       --config <CONFIG>        Path to a YAML config file (CLI flags override its values)
@@ -97,10 +103,35 @@ Options:
   -m, --multiple <MULTIPLE>    Specify the maximum number of target addresses, Only works on one target address [default: 0]
   -v, --view-type <VIEW_TYPE>  Initial view mode: graph/table/point/sparkline (switch at runtime with 1-4 / Tab) [default: graph]
   -o, --output <OUTPUT>        Output file to save ping results
+      --history-db <PATH>      SQLite database to append queryable probe history
   -h, --help                   Print help
   -V, --version                Print version
 
 ```
+
+### Local History
+
+Store ICMP or TCP probe samples in a local SQLite database without running
+Prometheus:
+
+```bash
+nbping ws.example.com --tcp-port 443 -i 1 --history-db nbping.db
+```
+
+Query an inclusive time range, optionally filtering by target:
+
+```bash
+nbping history --db nbping.db \
+  --from "2026-09-15T14:00:00+08:00" \
+  --to "2026-09-15T15:00:00+08:00" \
+  --target ws.example.com
+```
+
+RFC3339 timestamps are recommended. Local `YYYY-MM-DD HH:MM[:SS]` values are
+also accepted. Results are ordered by sample time and include availability,
+success/timeout counts, RTT statistics, and individual samples. The database is
+appended across runs. These records describe ICMP or TCP connectivity, not the
+WebSocket protocol, authentication, or application messages.
 
 ### Exporter Usage
 
@@ -155,6 +186,7 @@ tcp_port: 443          # target port; enables TCP unless tcp is explicitly false
 multiple: 0            # tui mode only
 view_type: graph       # graph | table | point | sparkline (tui mode only)
 # output: results.log  # tui mode only
+# history_db: nbping.db # tui mode only; appends queryable SQLite history
 port: 9090             # exporter mode only
 ```
 
@@ -174,6 +206,8 @@ Notes:
   `--tcp-port` selects the target service port, while exporter `-p/--port`
   selects the Prometheus HTTP listening port.
   In YAML, an explicit `tcp: false` keeps ICMP enabled while retaining `tcp_port`.
+- **History:** `--history-db` or `history_db` appends samples to SQLite. The
+  existing `--output` option remains a new-file-only plain text export.
 - Unknown keys are rejected, so typos surface as errors at startup.
 
 

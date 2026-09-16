@@ -8,6 +8,7 @@ mod data_processor;
 mod exporter;
 mod view;
 mod config;
+mod history;
 
 use clap::{Parser, Subcommand};
 use std::collections::VecDeque;
@@ -25,6 +26,7 @@ use crate::network::send_ping;
 use crate::exporter::{PrometheusMetrics, http_server, spawn_ping_workers};
 use crate::view::View;
 use crate::config::{FileConfig, Mode};
+use crate::history::HistoryWriter;
 
 struct RawModeGuard;
 
@@ -88,6 +90,9 @@ struct Args {
     #[arg(short = 'o', long = "output", help = "Output file to save ping results")]
     output: Option<String>,
 
+    #[arg(long = "history-db", value_name = "PATH", help = "SQLite database to append queryable probe history")]
+    history_db: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -108,12 +113,36 @@ enum Commands {
         #[arg(short, long, help = "Prometheus metrics HTTP port [default: 9090]")]
         port: Option<u16>,
     },
+
+    /// Query probe history stored in a local SQLite database
+    History {
+        /// SQLite history database path
+        #[arg(long, value_name = "PATH")]
+        db: String,
+
+        /// Inclusive range start (RFC3339 or local YYYY-MM-DD HH:MM[:SS])
+        #[arg(long)]
+        from: String,
+
+        /// Inclusive range end (RFC3339 or local YYYY-MM-DD HH:MM[:SS])
+        #[arg(long)]
+        to: String,
+
+        /// Only show records for this target
+        #[arg(long)]
+        target: Option<String>,
+    },
 }
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // parse command line arguments
     let args = Args::parse();
+
+    if let Some(Commands::History { db, from, to, target }) = &args.command {
+        history::print_history(db, from, to, target.as_deref())?;
+        return Ok(());
+    }
 
     // Load the YAML config file when one was provided. Values from it act as a
     // baseline that command-line flags override (CLI > YAML > built-in default).
@@ -133,6 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //  - otherwise the config file's `mode` field decides (defaulting to tui)
     let run_exporter = match &args.command {
         Some(Commands::Exporter { .. }) => true,
+        Some(Commands::History { .. }) => unreachable!(),
         None => match file_cfg.mode() {
             Ok(mode) => mode == Mode::Exporter,
             Err(err) => {
@@ -147,6 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // own target/interval/port) or top-level flags alongside `--config mode: exporter`.
         let (sub_target, sub_interval, sub_port) = match args.command {
             Some(Commands::Exporter { target, interval, port }) => (target, interval, port),
+            Some(Commands::History { .. }) => unreachable!(),
             None => (Vec::new(), None, None),
         };
         let cfg = config::resolve_exporter(
@@ -198,6 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.multiple,
             args.view_type,
             args.output,
+            args.history_db,
             &file_cfg,
         );
         if cfg.targets.is_empty() {
@@ -249,6 +281,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cfg.multiple,
             cfg.view_type,
             cfg.output,
+            cfg.history_db,
         ));
         if let Err(err) = res {
             eprintln!("{}", err);
@@ -268,7 +301,11 @@ async fn run_app(
     multiple: i32,
     view_type: String,
     output_file: Option<String>,
+    history_db: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+    let history_writer = history_db.map(HistoryWriter::start).transpose()?;
+    let history_tx = history_writer.as_ref().map(HistoryWriter::sender);
 
     // init terminal
     let terminal = draw::init_terminal()?;
@@ -316,11 +353,11 @@ async fn run_app(
         (addr, ip.clone())
     }).collect();
 
-    start_data_processor(
+    let data_processor_handle = start_data_processor(
         ping_event_rx,
         ui_data_tx,
         targets_for_processor,
-        running.clone(),
+        history_tx,
     );
 
     let initial_view = View::from_str(&view_type).unwrap_or(View::Graph);
@@ -384,20 +421,87 @@ async fn run_app(
     });
 
     // Wait for all ping tasks to complete
+    let mut ping_task_error = None;
     for task in tasks {
-        task.await?;
+        if let Err(error) = task.await {
+            if ping_task_error.is_none() {
+                ping_task_error = Some(error);
+            }
+        }
     }
+
+    drop(ping_event_tx);
+
+    let data_processor_result = data_processor_handle.join();
+    let history_result = history_writer.map(HistoryWriter::finish).transpose();
     
     // All ping tasks completed, signal UI to exit
     *running.lock().unwrap() = false;
     
     // Wait for UI task to finish
-    ui_task.await?;
+    let ui_result = ui_task.await;
     
     // restore terminal
     draw::restore_terminal(&mut terminal_guard.lock().unwrap().terminal.as_mut().unwrap())?;
 
+    if let Some(error) = ping_task_error {
+        return Err(error.into());
+    }
+    if data_processor_result.is_err() {
+        return Err("data processor thread panicked".into());
+    }
+    history_result?;
+    ui_result?;
+
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn parses_tui_history_database_without_changing_existing_flags() {
+        let args = Args::try_parse_from([
+            "nbping",
+            "example.com",
+            "--tcp-port",
+            "443",
+            "--history-db",
+            "nbping.db",
+        ])
+        .unwrap();
+        assert_eq!(args.target, vec!["example.com"]);
+        assert_eq!(args.tcp_port, Some(443));
+        assert_eq!(args.history_db.as_deref(), Some("nbping.db"));
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn parses_history_time_range_subcommand() {
+        let args = Args::try_parse_from([
+            "nbping",
+            "history",
+            "--db",
+            "nbping.db",
+            "--from",
+            "2026-09-15T14:00:00+08:00",
+            "--to",
+            "2026-09-15T15:00:00+08:00",
+            "--target",
+            "example.com",
+        ])
+        .unwrap();
+        match args.command {
+            Some(Commands::History { db, from, to, target }) => {
+                assert_eq!(db, "nbping.db");
+                assert_eq!(from, "2026-09-15T14:00:00+08:00");
+                assert_eq!(to, "2026-09-15T15:00:00+08:00");
+                assert_eq!(target.as_deref(), Some("example.com"));
+            }
+            _ => panic!("expected history subcommand"),
+        }
+    }
 }
 
 async fn run_exporter_mode(

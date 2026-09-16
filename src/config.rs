@@ -41,6 +41,8 @@ pub struct FileConfig {
     pub view_type: Option<String>,
     /// File to save ping results to (tui mode only).
     pub output: Option<String>,
+    /// SQLite database used to append queryable probe history (tui mode only).
+    pub history_db: Option<String>,
     /// Prometheus metrics HTTP port (exporter mode only).
     pub port: Option<u16>,
 }
@@ -135,6 +137,7 @@ pub struct ResolvedTui {
     pub multiple: i32,
     pub view_type: String,
     pub output: Option<String>,
+    pub history_db: Option<String>,
 }
 
 /// Fully-resolved settings for exporter mode, after merging `CLI > YAML > default`.
@@ -174,6 +177,7 @@ pub fn resolve_tui(
     cli_multiple: Option<i32>,
     cli_view_type: Option<String>,
     cli_output: Option<String>,
+    cli_history_db: Option<String>,
     file: &FileConfig,
 ) -> ResolvedTui {
     let tcp_port = cli_tcp_port.or(file.tcp_port).unwrap_or(80);
@@ -191,6 +195,7 @@ pub fn resolve_tui(
             .or_else(|| file.view_type.clone())
             .unwrap_or_else(|| "graph".to_string()),
         output: cli_output.or_else(|| file.output.clone()),
+        history_db: cli_history_db.or_else(|| file.history_db.clone()),
     }
 }
 
@@ -247,6 +252,7 @@ tcp_port: 443
 multiple: 3
 view_type: table
 output: out.log
+history_db: history.db
 port: 9100
 "#;
         let cfg: FileConfig = serde_yaml_ng::from_str(yaml).unwrap();
@@ -263,6 +269,7 @@ port: 9100
         assert_eq!(cfg.multiple, Some(3));
         assert_eq!(cfg.view_type.as_deref(), Some("table"));
         assert_eq!(cfg.output.as_deref(), Some("out.log"));
+        assert_eq!(cfg.history_db.as_deref(), Some("history.db"));
         assert_eq!(cfg.port, Some(9100));
         assert_eq!(cfg.mode().unwrap(), Mode::Exporter);
     }
@@ -338,7 +345,7 @@ port: 9100
 
     #[test]
     fn tui_cli_overrides_file() {
-        let f = file("interval: 9\ncount: 100\nview_type: table");
+        let f = file("interval: 9\ncount: 100\nview_type: table\nhistory_db: file.db");
         let r = resolve_tui(
             vec!["a.com".into()],
             Some(5),           // cli count
@@ -349,24 +356,26 @@ port: 9100
             None,
             Some("point".into()), // cli view_type
             None,
+            Some("cli.db".into()),
             &f,
         );
         assert_eq!(r.count, 5);
         assert_eq!(r.interval, 2);
         assert_eq!(r.view_type, "point");
         assert_eq!(r.targets, vec!["a.com".to_string()]);
+        assert_eq!(r.history_db.as_deref(), Some("cli.db"));
     }
 
     #[test]
     fn tui_falls_back_to_file_then_default() {
         let f = file("interval: 9\nview_type: sparkline");
-        let r = resolve_tui(vec!["a.com".into()], None, None, false, false, None, None, None, None, &f);
+        let r = resolve_tui(vec!["a.com".into()], None, None, false, false, None, None, None, None, None, &f);
         assert_eq!(r.interval, 9); // from file
         assert_eq!(r.view_type, "sparkline"); // from file
         assert_eq!(r.count, 0); // default
 
         let empty = FileConfig::default();
-        let r = resolve_tui(vec!["a.com".into()], None, None, false, false, None, None, None, None, &empty);
+        let r = resolve_tui(vec!["a.com".into()], None, None, false, false, None, None, None, None, None, &empty);
         assert_eq!(r.interval, 0); // tui default
         assert_eq!(r.view_type, "graph"); // default
         assert_eq!(r.multiple, 0);
@@ -377,18 +386,18 @@ port: 9100
         let on = file("force_ipv6: true");
         let off = FileConfig::default();
         // CLI flag enables it.
-        assert!(resolve_tui(vec!["a".into()], None, None, true, false, None, None, None, None, &off).force_ipv6);
+        assert!(resolve_tui(vec!["a".into()], None, None, true, false, None, None, None, None, None, &off).force_ipv6);
         // File enables it even without the CLI flag.
-        assert!(resolve_tui(vec!["a".into()], None, None, false, false, None, None, None, None, &on).force_ipv6);
+        assert!(resolve_tui(vec!["a".into()], None, None, false, false, None, None, None, None, None, &on).force_ipv6);
         // Neither set -> off.
-        assert!(!resolve_tui(vec!["a".into()], None, None, false, false, None, None, None, None, &off).force_ipv6);
+        assert!(!resolve_tui(vec!["a".into()], None, None, false, false, None, None, None, None, None, &off).force_ipv6);
     }
 
     #[test]
     fn tui_tcp_port_enables_tcp_and_cli_wins() {
         let f = file("tcp: false\ntcp_port: 8080");
         let r = resolve_tui(
-            vec!["a".into()], None, None, false, false, Some(443), None, None, None, &f,
+            vec!["a".into()], None, None, false, false, Some(443), None, None, None, None, &f,
         );
         assert!(r.tcp);
         assert_eq!(r.tcp_port, 443);
@@ -398,7 +407,7 @@ port: 9100
     fn tui_explicit_file_tcp_false_disables_file_port() {
         let f = file("tcp: false\ntcp_port: 8080");
         let r = resolve_tui(
-            vec!["a".into()], None, None, false, false, None, None, None, None, &f,
+            vec!["a".into()], None, None, false, false, None, None, None, None, None, &f,
         );
         assert!(!r.tcp);
         assert_eq!(r.tcp_port, 8080);

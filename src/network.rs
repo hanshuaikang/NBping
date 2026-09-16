@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::SyncSender;
 use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
+use chrono::Utc;
 
 use pinger::{ping, PingOptions, PingResult};
 use crate::ping_event::PingEvent;
@@ -145,6 +146,8 @@ impl PingTask {
                                 addr: self.addr.clone(),
                                 ip: self.ip.clone(),
                                 rtt: rtt_display,
+                                sampled_at_ms: Utc::now().timestamp_millis(),
+                                tcp_port: None,
                             };
                             
                             if ping_event_tx.send(event).is_err() {
@@ -155,6 +158,9 @@ impl PingTask {
                             let event = PingEvent::Timeout {
                                 addr: self.addr.clone(),
                                 ip: self.ip.clone(),
+                                sampled_at_ms: Utc::now().timestamp_millis(),
+                                tcp_port: None,
+                                error: None,
                             };
                             
                             if ping_event_tx.send(event).is_err() {
@@ -211,10 +217,15 @@ impl PingTask {
                     addr: self.addr.clone(),
                     ip: self.ip.clone(),
                     rtt: (duration.as_secs_f64() * 100_000.0).round() / 100.0,
+                    sampled_at_ms: Utc::now().timestamp_millis(),
+                    tcp_port: Some(port),
                 },
-                Err(_) => PingEvent::Timeout {
+                Err(error) => PingEvent::Timeout {
                     addr: self.addr.clone(),
                     ip: self.ip.clone(),
+                    sampled_at_ms: Utc::now().timestamp_millis(),
+                    tcp_port: Some(port),
+                    error: Some(error.to_string()),
                 },
             };
 
